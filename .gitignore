@@ -1,0 +1,23 @@
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+
+# IDE settings
+.idea/
+.vscode/
+
+# Rust/Cargo build outputs
+**/target/
+**/*.rs.bk
+
+# Fuzzing runtime outputs
+**/fuzz/artifacts/
+**/fuzz/coverage/
+**/fuzz/corpus/
+
+# Logs and temp files
+*.log
+tmp/
