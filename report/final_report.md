@@ -1,4 +1,4 @@
-# Unsafe Study — Final Case Study Report
+# Unsafe Study -- Final Case Study Report
 
 **Author:** TBD
 **Date:** 2026-03-05
@@ -8,7 +8,7 @@
 
 ## 1. Introduction
 
-This report presents a case study on `unsafe`-related failures in three real-world, input-facing Rust crates. We applied a three-phase methodology — hotspot mining, Miri-based UB detection, and coverage-guided fuzzing — to each crate and compared the findings across tools.
+This report presents a case study on `unsafe`-related failures in three real-world, input-facing Rust crates. We applied a three-phase methodology -- hotspot mining, Miri-based UB detection, and coverage-guided fuzzing -- to each crate and compared the findings across tools.
 
 ### Crate Selection Rationale
 
@@ -30,7 +30,7 @@ Full annotations are in `geiger_reports/*_annotations.md`. Below is a summary of
 
 ### httparse
 
-All `unsafe` is direct — no transitive dependencies contribute.
+All `unsafe` is direct -- no transitive dependencies contribute.
 
 | Module | Unsafe expressions | Pattern |
 |--------|-------------------|---------|
@@ -61,7 +61,7 @@ bstr has the highest direct unsafe count of the three crates.
 | memchr | 2,111 | SIMD search intrinsics (shared with serde_json) |
 | regex-automata | 611 | DFA table construction |
 
-Key direct modules: `src/ext_slice.rs` + `src/ext_vec.rs` (~160 expr, byte string ops), `src/ascii.rs` (~90 expr, ASCII detection — **UB found here**), `src/unicode/` + `src/utf8.rs` (~60 expr, UTF-8 decoding).
+Key direct modules: `src/ext_slice.rs` + `src/ext_vec.rs` (~160 expr, byte string ops), `src/ascii.rs` (~90 expr, ASCII detection -- **UB found here**), `src/unicode/` + `src/utf8.rs` (~60 expr, UTF-8 decoding).
 
 ### Cross-Crate Dependency Overlap
 
@@ -73,23 +73,23 @@ The `memchr` crate contributes 2,111 unsafe items to **both** serde_json and bst
 
 Miri was run with `MIRIFLAGS="-Zmiri-symbolic-alignment-check -Zmiri-strict-provenance"` on each crate's full test suite.
 
-### httparse — CLEAN
+### httparse -- CLEAN
 
 All tests passed under Miri. No undefined behavior detected.
 
 This is consistent with httparse's careful use of unaligned loads (`_mm_lddqu_si128`, `read_unaligned`) throughout its SIMD and SWAR code paths.
 
-### serde_json — Alignment UB in memchr (FALSE POSITIVE)
+### serde_json -- Alignment UB in memchr (FALSE POSITIVE)
 
 **Initial finding** (with `-Zmiri-symbolic-alignment-check`):
 
 ```
 error: Undefined Behavior: accessing memory based on pointer with alignment 1,
        but alignment 16 is required
- → core_arch/src/x86/sse2.rs:1320:5  (_mm_load_si128)
+ -> core_arch/src/x86/sse2.rs:1320:5  (_mm_load_si128)
 ```
 
-**Stack trace**: `_mm_load_si128` ← `memchr::vector::x86sse2::load_aligned` ← `memchr::memrchr` ← `serde_json::de::SliceRead::position_of_index` ← `test_parse_number_errors`
+**Stack trace**: `_mm_load_si128` <- `memchr::vector::x86sse2::load_aligned` <- `memchr::memrchr` <- `serde_json::de::SliceRead::position_of_index` <- `test_parse_number_errors`
 
 **Investigation**: We re-ran Miri **without** `-Zmiri-symbolic-alignment-check` (using only `-Zmiri-strict-provenance`). Result: **all 97 tests passed clean**, including `test_parse_number_errors`.
 
@@ -97,25 +97,25 @@ error: Undefined Behavior: accessing memory based on pointer with alignment 1,
 
 **Log**: `miri_reports/serde_json.log` (original), `miri_reports/serde_json_no_symcheck.log` (clean re-run)
 
-### bstr — Alignment UB in ascii.rs (FALSE POSITIVE)
+### bstr -- Alignment UB in ascii.rs (FALSE POSITIVE)
 
 **Initial finding** (with `-Zmiri-symbolic-alignment-check`):
 
 ```
 error: Undefined Behavior: accessing memory based on pointer with alignment 1,
        but alignment 8 is required
- → src/ascii.rs:80:25  (*(ptr as *const usize))
+ -> src/ascii.rs:80:25  (*(ptr as *const usize))
 ```
 
-**Stack trace**: `*(ptr as *const usize)` ← `ascii::first_non_ascii_byte_fallback` ← `ascii::tests::positive_fallback_forward`
+**Stack trace**: `*(ptr as *const usize)` <- `ascii::first_non_ascii_byte_fallback` <- `ascii::tests::positive_fallback_forward`
 
 **Investigation**: Re-ran Miri without `-Zmiri-symbolic-alignment-check`. Result: **`positive_fallback_forward` passed clean** (along with all other tests that completed before timeout).
 
 **Verdict**: **False positive.** The `first_non_ascii_byte_fallback` function at `ascii.rs:80` performs a word-at-a-time read by casting `*const u8` to `*const usize` and dereferencing. The code contains alignment logic that bumps the pointer to a usize-aligned boundary before entering the tight loop. The symbolic checker flags the provenance-based alignment (1), not the actual pointer value (which is correctly aligned).
 
-**Note**: Unlike httparse's use of `read_unaligned`, bstr's fallback uses `*(ptr as *const usize)` which *does* require alignment — but the code ensures alignment before reaching this point. Using `read_unaligned` would be a more defensive approach.
+**Note**: Unlike httparse's use of `read_unaligned`, bstr's fallback uses `*(ptr as *const usize)` which *does* require alignment -- but the code ensures alignment before reaching this point. Using `read_unaligned` would be a more defensive approach.
 
-**Note on Miri test coverage**: Miri stops at the first UB, so with `-Zmiri-symbolic-alignment-check` enabled, bstr's Miri run was cut short after the `ascii.rs` finding. The bstr → memchr SSE2 path (same as serde_json's finding) was never reached. Without the symbolic checker, Miri ran all the way through (though some regex-automata-backed tests timed out due to Miri's interpretation overhead).
+**Note on Miri test coverage**: Miri stops at the first UB, so with `-Zmiri-symbolic-alignment-check` enabled, bstr's Miri run was cut short after the `ascii.rs` finding. The bstr -> memchr SSE2 path (same as serde_json's finding) was never reached. Without the symbolic checker, Miri ran all the way through (though some regex-automata-backed tests timed out due to Miri's interpretation overhead).
 
 **Log**: `miri_reports/bstr.log` (original), `miri_reports/bstr_no_symcheck.log` (clean re-run)
 
@@ -157,7 +157,7 @@ All fuzzing was run on Debian Linux with cargo-fuzz (libFuzzer backend), 300 sec
 
 **Seed corpus**: Valid JSON objects/arrays, malformed JSON, edge-case floats, string escapes.
 
-**Key question answered**: The fuzzer did NOT trigger any crashes related to the memchr SSE2 aligned-load path. This is consistent with the Miri finding being a false positive — on real x86_64 hardware, the aligned loads operate on properly aligned memory at runtime.
+**Key question answered**: The fuzzer did NOT trigger any crashes related to the memchr SSE2 aligned-load path. This is consistent with the Miri finding being a false positive -- on real x86_64 hardware, the aligned loads operate on properly aligned memory at runtime.
 
 **Result**: No crashes in ~22M total iterations. serde_json's parser handles arbitrary byte input robustly.
 
@@ -195,23 +195,23 @@ No crashes, panics, or memory safety issues were found across 422M fuzz iteratio
 | **Findings** | 2 alignment UB reports (both false positives from symbolic checker) | 0 crashes across 422M iterations |
 | **Detection model** | Interprets MIR; catches UB on executed test paths | Generates random inputs; catches crashes/panics from unexpected inputs |
 | **Path coverage** | Bounded by existing test suite | Explores input space beyond hand-written tests |
-| **Sensitivity** | Very high — catches subtle UB even without visible symptoms | Lower for memory safety (UB may not manifest as crash on x86_64) |
+| **Sensitivity** | Very high -- catches subtle UB even without visible symptoms | Lower for memory safety (UB may not manifest as crash on x86_64) |
 | **False positive risk** | `-Zmiri-symbolic-alignment-check` can over-report alignment issues | Very low (a crash is a crash) |
 
 ### Effort Comparison
 
 | Task | Miri | Fuzzing |
 |------|------|---------|
-| Setup | Minimal — `cargo miri test` on existing tests | Moderate — write harnesses, create seed corpus, platform requirements |
+| Setup | Minimal -- `cargo miri test` on existing tests | Moderate -- write harnesses, create seed corpus, platform requirements |
 | Platform | Cross-platform (works on Windows + Linux) | **Linux-only** (libFuzzer incompatible with MSVC) |
 | Runtime | Minutes per crate (but slow on large test suites) | Fixed budget (5 min/target here); production runs use hours |
-| Interpretation | Requires understanding UB semantics, Miri flags, false positive analysis | Straightforward — crash = bug |
+| Interpretation | Requires understanding UB semantics, Miri flags, false positive analysis | Straightforward -- crash = bug |
 
 ### Complementarity
 
 - **Miri excels at**: Detecting semantic UB (alignment, provenance, uninitialized memory) that may never cause observable symptoms on real hardware. Even our false positives flagged code patterns worth reviewing.
 - **Fuzzing excels at**: Finding robustness issues, panics, and logic errors from inputs no human wrote. Coverage-guided fuzzing reaches code paths that existing test suites may miss.
-- **Neither found bugs here**: All three crates proved robust under both tools. This is a positive result — these are mature, well-maintained libraries.
+- **Neither found bugs here**: All three crates proved robust under both tools. This is a positive result -- these are mature, well-maintained libraries.
 
 ### Key Insight: Architecture Masks UB
 
@@ -283,14 +283,14 @@ bash scripts/run_fuzz.sh httparse parse_request 300  # Single target
 
 | Goal | Status | Evidence |
 |------|--------|----------|
-| **G1**: Hotspot map | ✅ Complete | Geiger scans + per-crate annotations in `geiger_reports/*_annotations.md` |
-| **G2**: Run Miri + fuzzing | ✅ Complete | 2 Miri findings (false positives), 0 fuzz crashes across 422M iterations |
-| **G3**: Cross-tool comparison | ✅ Complete | Section 5 above; Miri finds semantic UB, fuzzing tests robustness, neither found true bugs |
+| **G1**: Hotspot map | [OK] Complete | Geiger scans + per-crate annotations in `geiger_reports/*_annotations.md` |
+| **G2**: Run Miri + fuzzing | [OK] Complete | 2 Miri findings (false positives), 0 fuzz crashes across 422M iterations |
+| **G3**: Cross-tool comparison | [OK] Complete | Section 5 above; Miri finds semantic UB, fuzzing tests robustness, neither found true bugs |
 
 ### What the proposal got right
 
-- Crate selection criteria led to productive targets — 2 of 3 crates triggered Miri findings that required substantive investigation
-- The phased approach (geiger → Miri → fuzz) was effective: geiger identified where unsafe lives, Miri immediately probed those areas
+- Crate selection criteria led to productive targets -- 2 of 3 crates triggered Miri findings that required substantive investigation
+- The phased approach (geiger -> Miri -> fuzz) was effective: geiger identified where unsafe lives, Miri immediately probed those areas
 - Choosing crates with shared dependencies (memchr) enabled cross-crate comparison as promised
 
 ### What the proposal underestimated

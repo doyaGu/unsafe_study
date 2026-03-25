@@ -8,7 +8,7 @@ We will run a case study on several real-world, input-facing Rust crates (e.g., 
 
 1. Map `unsafe` "hotspots" in each crate and its dependency graph.
 2. Run each crate's test suite under **Miri** to catch undefined behavior (UB) from violated `unsafe` assumptions.
-3. Write 1–3 **coverage-guided fuzz targets** per crate around input-facing APIs to hunt for panics, crashes, and edge cases.
+3. Write 1-3 **coverage-guided fuzz targets** per crate around input-facing APIs to hunt for panics, crashes, and edge cases.
 4. Write up where `unsafe` appears, what broke (if anything), and how Miri and fuzzing each performed across the crates.
 
 ## Motivation
@@ -55,7 +55,7 @@ Run each crate's tests under Miri. If Miri reports UB, minimize it into a short 
 
 ### Step C: Coverage-Guided Fuzzing
 
-Write 1–3 fuzz targets per crate with `cargo-fuzz`, pointed at the most input-facing entry points (e.g., parse/decode). For each target:
+Write 1-3 fuzz targets per crate with `cargo-fuzz`, pointed at the most input-facing entry points (e.g., parse/decode). For each target:
 
 - seed the corpus with a handful of valid and near-valid inputs,
 - run fuzzing for a fixed time budget,
@@ -72,7 +72,7 @@ Write a short case study report and a reproducible artifact (scripts + instructi
   - the `cargo-geiger` scan and hotspot summary,
   - `cargo miri test` for selected test targets,
   - `cargo fuzz run` for each fuzz target with time budget.
-- 1–3 fuzz harnesses.
+- 1-3 fuzz harnesses.
 
 ## Evaluation
 

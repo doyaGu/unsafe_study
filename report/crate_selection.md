@@ -3,11 +3,11 @@
 ## Selection Criteria
 
 Each target crate must satisfy:
-1. **Input-driven API** — public `parse`, `decode`, `from_bytes`, `from_slice`, or similar
-2. **Existing test suite** — builds and passes on the pinned nightly toolchain
-3. **Measurable `unsafe`** — either directly in the crate or via a key dependency
-4. **Mid-size** — not trivially small, not overwhelmingly large
-5. **Miri-compatible** — no hard FFI dependency that blocks Miri entirely
+1. **Input-driven API** -- public `parse`, `decode`, `from_bytes`, `from_slice`, or similar
+2. **Existing test suite** -- builds and passes on the pinned nightly toolchain
+3. **Measurable `unsafe`** -- either directly in the crate or via a key dependency
+4. **Mid-size** -- not trivially small, not overwhelmingly large
+5. **Miri-compatible** -- no hard FFI dependency that blocks Miri entirely
 
 ## Selected Crates
 
@@ -18,14 +18,14 @@ Each target crate must satisfy:
 | Version  | latest (to be pinned at clone time) |
 | Domain   | HTTP/1.1 request/response parsing |
 | API      | `Request::parse(&[u8])`, `Response::parse(&[u8])` |
-| unsafe   | Direct — SIMD-accelerated header scanning in hot loop |
+| unsafe   | Direct -- SIMD-accelerated header scanning in hot loop |
 | Tests    | ~60 unit tests, all pure Rust |
 | Miri     | Expected compatible (no FFI) |
 | Repo     | https://github.com/seanmonstar/httparse |
 
 **Why**: Small and focused crate with well-documented direct `unsafe` for
 performance. The parsing API accepts raw `&[u8]`, making it ideal for fuzzing.
-The `unsafe` blocks are concentrated in SIMD/SSE2 header scanning — a good
+The `unsafe` blocks are concentrated in SIMD/SSE2 header scanning -- a good
 hotspot mapping target.
 
 ### 2. `serde_json`
@@ -52,7 +52,7 @@ dependency graph (serde, itoa, ryu).
 | Version  | latest |
 | Domain   | Byte string handling (non-UTF-8-safe) |
 | API      | `ByteSlice` trait methods, `BString` constructors |
-| unsafe   | Direct — UTF-8 boundary tricks, SIMD find operations |
+| unsafe   | Direct -- UTF-8 boundary tricks, SIMD find operations |
 | Tests    | Comprehensive property tests |
 | Miri     | Expected compatible (pure Rust) |
 | Repo     | https://github.com/BurntSushi/bstr |

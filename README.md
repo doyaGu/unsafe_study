@@ -1,7 +1,6 @@
-# unsafe_study — Finding and Understanding `unsafe`-Related Failures in Real Rust Crates
+# unsafe_study -- Finding and Understanding `unsafe`-Related Failures in Real Rust Crates
 
-CSE 5349 project: hotspot mining, Miri, and coverage-guided fuzzing on
-real-world Rust crates.
+CSE 5349 project: hotspot mining, Miri, and coverage-guided fuzzing on real-world Rust crates.
 
 ## Current Status (2026-03-24)
 
@@ -29,17 +28,17 @@ cargo install cargo-fuzz
 
 ```
 unsafe_study/
-├── rust-toolchain.toml   # pinned nightly for Miri + cargo-fuzz
-├── README.md
-├── targets/              # git clones of target crates
-├── geiger_reports/       # cargo-geiger JSON output + annotations
-├── miri_reports/         # Miri test logs + reproducers
-├── fuzz_targets/         # fuzz harness source per crate
-├── fuzz_corpus/          # seed corpus per crate/target
-├── fuzz_findings/        # minimized crash artifacts
-├── extensions_harness/   # offline Miri/test harness for extension crates
-├── scripts/              # automation (run_all.ps1, summarize_geiger.py)
-└── report/               # final write-up, figures, crate_selection.md
+|-- rust-toolchain.toml   # pinned nightly for Miri + cargo-fuzz
+|-- README.md
+|-- targets/              # git clones of target crates
+|-- geiger_reports/       # cargo-geiger JSON output + annotations
+|-- miri_reports/         # Miri test logs + reproducers
+|-- fuzz_targets/         # fuzz harness source per crate
+|-- fuzz_corpus/          # seed corpus per crate/target
+|-- fuzz_findings/        # minimized crash artifacts
+|-- extensions_harness/   # offline Miri/test harness for extension crates
+|-- scripts/              # automation (run_all.ps1, summarize_geiger.py)
+|-- report/               # final write-up, figures, crate_selection.md
 ```
 
 ## Toolchain
@@ -99,11 +98,11 @@ Conditional:
 
 ## Pipeline Phases
 
-1. **Phase 1 — Crate Selection**: cargo-geiger feasibility scan, Miri dry run
-2. **Phase 2 — Hotspot Mining**: `cargo geiger --output-format=json` + summary script
-3. **Phase 3 — Miri Testing**: `cargo miri test` with strict provenance flags
-4. **Phase 4 — Fuzzing**: `cargo fuzz run` with seeded corpus, fixed time budget
-5. **Phase 5 — Reporting**: cross-crate comparison, write-up
+1. **Phase 1 -- Crate Selection**: cargo-geiger feasibility scan, Miri dry run
+2. **Phase 2 -- Hotspot Mining**: `cargo geiger --output-format=json` + summary script
+3. **Phase 3 -- Miri Testing**: `cargo miri test` with strict provenance flags
+4. **Phase 4 -- Fuzzing**: `cargo fuzz run` with seeded corpus, fixed time budget
+5. **Phase 5 -- Reporting**: cross-crate comparison, write-up
 
 ## Reproducing
 

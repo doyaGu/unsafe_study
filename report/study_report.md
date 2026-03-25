@@ -1,4 +1,4 @@
-# Unsafe Study — Initial Feasibility Report
+# Unsafe Study -- Initial Feasibility Report
 
 - Generated: 2026-03-04
 - Toolchain: nightly-2026-02-01 (rustc 1.95.0-nightly, 905b92696 2026-01-31)
@@ -8,9 +8,9 @@
 
 | Crate | Version | Domain | Status |
 |-------|---------|--------|--------|
-| httparse | 1.10.1 | HTTP parsing | ✅ All phases viable |
-| serde_json | 1.0.149 | JSON deserialization | ✅ All phases viable |
-| bstr | 1.12.1 | Byte strings | ✅ All phases viable (UB found) |
+| httparse | 1.10.1 | HTTP parsing | [OK] All phases viable |
+| serde_json | 1.0.149 | JSON deserialization | [OK] All phases viable |
+| bstr | 1.12.1 | Byte strings | [OK] All phases viable (UB found) |
 
 ## Phase 2: Cargo-Geiger Hotspot Summary
 
@@ -22,9 +22,9 @@
 | Expressions | 248 | 335 |
 | Impls | 0 | 0 |
 | Methods | 6 | 6 |
-| **Dependencies** | — | None (standalone) |
+| **Dependencies** | -- | None (standalone) |
 
-**Notes**: All `unsafe` is direct — concentrated in SIMD/SSE2 header scanning
+**Notes**: All `unsafe` is direct -- concentrated in SIMD/SSE2 header scanning
 hot loop. No transitive `unsafe` dependencies. Ideal for hotspot annotation.
 
 ---
@@ -64,14 +64,14 @@ cross-crate comparison of the same dependency's unsafe impact.
 
 ## Phase 3: Miri Results
 
-### httparse — ✅ CLEAN
+### httparse -- [OK] CLEAN
 - All tests passed under Miri with strict provenance
 - No UB detected
 - Full log: `miri_reports/httparse.log`
 
-### serde_json — ❌ UB DETECTED
+### serde_json -- [X] UB DETECTED
 
-**Finding**: Undefined Behavior — alignment violation in `memchr` 2.8.0
+**Finding**: Undefined Behavior -- alignment violation in `memchr` 2.8.0
 
 ```
 error: Undefined Behavior: accessing memory based on pointer with alignment 1,
@@ -84,13 +84,13 @@ error: Undefined Behavior: accessing memory based on pointer with alignment 1,
 **Stack trace path**:
 ```
 _mm_load_si128 (SSE2 intrinsic, requires 16-byte alignment)
-  ← memchr::vector::x86sse2::Vector::load_aligned
-  ← memchr::arch::generic::memchr::One::rfind_raw
-  ← memchr::memchr::memrchr
-  ← serde_json::de::SliceRead::position_of_index
-  ← serde_json::Deserializer::error (error position reporting)
-  ← serde_json::Deserializer::f64_from_parts
-  ← test_parse_number_errors
+  <- memchr::vector::x86sse2::Vector::load_aligned
+  <- memchr::arch::generic::memchr::One::rfind_raw
+  <- memchr::memchr::memrchr
+  <- serde_json::de::SliceRead::position_of_index
+  <- serde_json::Deserializer::error (error position reporting)
+  <- serde_json::Deserializer::f64_from_parts
+  <- test_parse_number_errors
 ```
 
 **Classification**: Alignment-based UB in `memchr` 2.8.0 SSE2 path.
@@ -99,16 +99,16 @@ The `_mm_load_si128` intrinsic requires 16-byte aligned memory, but
 
 **Note**: Miri reports this with the caveat: "but due to
 `-Zmiri-symbolic-alignment-check`, alignment errors can also be false
-positives." This needs further investigation — it may be that `memchr`
+positives." This needs further investigation -- it may be that `memchr`
 intentionally does aligned loads only on aligned portions of memory, and the
 symbolic check is too conservative. However, this is still a meaningful finding
 to report and cross-reference with the fuzzer.
 
 **Full log**: `miri_reports/serde_json.log`
 
-### bstr — ❌ UB DETECTED
+### bstr -- [X] UB DETECTED
 
-**Finding**: Undefined Behavior — alignment violation in bstr's own `ascii.rs`
+**Finding**: Undefined Behavior -- alignment violation in bstr's own `ascii.rs`
 
 ```
 error: Undefined Behavior: accessing memory based on pointer with alignment 1,
@@ -124,8 +124,8 @@ error: Undefined Behavior: accessing memory based on pointer with alignment 1,
 **Stack trace path**:
 ```
 *(ptr as *const usize)  (raw pointer cast, requires 8-byte alignment)
-  ← ascii::first_non_ascii_byte_fallback  (src/ascii.rs:80)
-  ← ascii::tests::positive_fallback_forward  (src/ascii.rs:275)
+  <- ascii::first_non_ascii_byte_fallback  (src/ascii.rs:80)
+  <- ascii::tests::positive_fallback_forward  (src/ascii.rs:275)
 ```
 
 **Classification**: Alignment-based UB in bstr's *direct* code (not a dependency).
@@ -156,7 +156,7 @@ the `from_str` test at `src/impls.rs:1158`). We patched the test with
 
 | Crate | Direct unsafe | Dep unsafe | Miri result | Key dependency overlap |
 |-------|--------------|-----------|-------------|----------------------|
-| httparse | 248 expr | 0 | CLEAN | — |
+| httparse | 248 expr | 0 | CLEAN | -- |
 | serde_json | 75 expr | 2735 expr | ~~UB (memchr alignment)~~ FALSE POSITIVE | memchr, zmij, itoa |
 | bstr | 364 expr | 2569 expr | ~~UB (ascii.rs alignment)~~ FALSE POSITIVE | memchr, regex-automata |
 
@@ -198,11 +198,11 @@ All fuzzing ran on native Debian Linux with cargo-fuzz/libFuzzer, 300s per targe
 
 ~~1. **Investigate memchr finding**: Determine if the alignment UB is a true bug or
    a Miri false positive under symbolic alignment checking~~
-   → **Done**: Both findings are false positives (see above)
+   -> **Done**: Both findings are false positives (see above)
 ~~2. **Run fuzzing in WSL2**: All fuzz targets are configured; run via `scripts/run_fuzz.sh`~~
-   → **Done**: All 7 targets ran clean on native Linux (see above)
+   -> **Done**: All 7 targets ran clean on native Linux (see above)
 ~~3. **Cross-reference**: Check if fuzzing triggers the same alignment paths Miri flagged~~
-   → **Done**: No crashes — consistent with false positive verdict
+   -> **Done**: No crashes -- consistent with false positive verdict
 
 **All tasks complete.** See `report/final_report.md` for the full case study report.
 
@@ -214,14 +214,14 @@ Mapping our findings back to the proposal goals:
 
 | Goal | Status | Evidence |
 |------|--------|----------|
-| **G1**: Hotspot map | ✅ Done | Geiger scans + per-crate annotations in `geiger_reports/*_annotations.md` |
-| **G2**: Run Miri + fuzzing | ✅ Done | 2 Miri findings (false positives), 0 fuzz crashes in 422M iterations |
-| **G3**: Cross-tool comparison | ✅ Done | Full comparison in `report/final_report.md` Section 5 |
+| **G1**: Hotspot map | [OK] Done | Geiger scans + per-crate annotations in `geiger_reports/*_annotations.md` |
+| **G2**: Run Miri + fuzzing | [OK] Done | 2 Miri findings (false positives), 0 fuzz crashes in 422M iterations |
+| **G3**: Cross-tool comparison | [OK] Done | Full comparison in `report/final_report.md` Section 5 |
 
 **What worked well in the proposal**:
 - The crate selection criteria (input-driven API, has tests, contains unsafe) led to
-  productive targets — 2 out of 3 crates yielded Miri findings requiring investigation.
-- The phased approach (geiger → Miri → fuzz) was effective: geiger identified where
+  productive targets -- 2 out of 3 crates yielded Miri findings requiring investigation.
+- The phased approach (geiger -> Miri -> fuzz) was effective: geiger identified where
   unsafe lives, and Miri immediately probed those areas.
 - Choosing crates with shared dependencies (memchr) enabled cross-crate comparison.
 
