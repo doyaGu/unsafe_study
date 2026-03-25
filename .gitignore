@@ -24,3 +24,10 @@ targets/
 # Logs and temp files
 *.log
 tmp/
+
+# LaTeX build intermediates
+*.aux
+*.fdb_latexmk
+*.fls
+*.out
+*.synctex.gz
