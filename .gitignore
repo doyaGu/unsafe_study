@@ -13,6 +13,9 @@ Thumbs.db
 **/target/
 **/*.rs.bk
 
+# Local clone cache of upstream crates (recreated by scripts/intake)
+targets/
+
 # Fuzzing runtime outputs
 **/fuzz/artifacts/
 **/fuzz/coverage/

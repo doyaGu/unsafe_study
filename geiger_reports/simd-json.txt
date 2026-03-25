@@ -1,0 +1,163 @@
+     Removed 248 files, 113.0MiB total
+   Compiling proc-macro2 v1.0.101
+   Compiling quote v1.0.41
+   Compiling unicode-ident v1.0.19
+   Compiling serde_core v1.0.228
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/build/quote-9cf6aa672522b25c/build_script_build-9cf6aa672522b25c.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/build/proc-macro2-17e32568540fc90a/build_script_build-17e32568540fc90a.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/unicode_ident-591df15350997623.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/build/serde_core-c44f039cd676198c/build_script_build-c44f039cd676198c.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libunicode_ident-591df15350997623.rmeta","emit":"metadata"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libunicode_ident-591df15350997623.rlib","emit":"link"}
+   Compiling autocfg v1.5.0
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/autocfg-3b49e0afa777d415.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/build/quote-9cf6aa672522b25c/build_script_build-9cf6aa672522b25c","emit":"link"}
+   Compiling serde v1.0.228
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/build/proc-macro2-17e32568540fc90a/build_script_build-17e32568540fc90a","emit":"link"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/build/serde-4c6639c325e28d82/build_script_build-4c6639c325e28d82.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/build/serde_core-c44f039cd676198c/build_script_build-c44f039cd676198c","emit":"link"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libautocfg-3b49e0afa777d415.rmeta","emit":"metadata"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/build/serde-4c6639c325e28d82/build_script_build-4c6639c325e28d82","emit":"link"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/proc_macro2-2bfd3bbc5a4438e3.d","emit":"dep-info"}
+    Checking allocator-api2 v0.2.21
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libautocfg-3b49e0afa777d415.rlib","emit":"link"}
+   Compiling num-traits v0.2.19
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/serde_core-a2e8d86d3fae8a7e.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/allocator_api2-c74e46d1a09fbb5b.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/build/num-traits-5d8ad8b3e4ba3de6/build_script_build-5d8ad8b3e4ba3de6.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libproc_macro2-2bfd3bbc5a4438e3.rmeta","emit":"metadata"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/build/num-traits-5d8ad8b3e4ba3de6/build_script_build-5d8ad8b3e4ba3de6","emit":"link"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/liballocator_api2-c74e46d1a09fbb5b.rmeta","emit":"metadata"}
+    Checking foldhash v0.2.0
+    Checking equivalent v1.0.2
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/equivalent-dbd0be9061b7acbc.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/foldhash-f83a8e2fbd1ec026.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libequivalent-dbd0be9061b7acbc.rmeta","emit":"metadata"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libfoldhash-f83a8e2fbd1ec026.rmeta","emit":"metadata"}
+    Checking hashbrown v0.16.0
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libproc_macro2-2bfd3bbc5a4438e3.rlib","emit":"link"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/quote-bfbf5320fdaf435c.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/num_traits-914ec5764f440ca9.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libquote-bfbf5320fdaf435c.rmeta","emit":"metadata"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/hashbrown-a6ae8b82ba57377d.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libquote-bfbf5320fdaf435c.rlib","emit":"link"}
+   Compiling syn v2.0.106
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libnum_traits-914ec5764f440ca9.rmeta","emit":"metadata"}
+   Compiling ref-cast v1.0.25
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libhashbrown-a6ae8b82ba57377d.rmeta","emit":"metadata"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/build/ref-cast-d169003d0daeb6e0/build_script_build-d169003d0daeb6e0.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/syn-7f726ccff118ceef.d","emit":"dep-info"}
+    Checking ryu v1.0.20
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/ryu-7fc86b5f7500c71e.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libryu-7fc86b5f7500c71e.rmeta","emit":"metadata"}
+   Compiling serde_json v1.0.145
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/build/serde_json-a61f8fdb2e20bb60/build_script_build-a61f8fdb2e20bb60.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/build/ref-cast-d169003d0daeb6e0/build_script_build-d169003d0daeb6e0","emit":"link"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/build/serde_json-a61f8fdb2e20bb60/build_script_build-a61f8fdb2e20bb60","emit":"link"}
+    Checking itoa v1.0.15
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/itoa-a41e1811ddda7bbe.d","emit":"dep-info"}
+    Checking float-cmp v0.10.0
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libitoa-a41e1811ddda7bbe.rmeta","emit":"metadata"}
+    Checking memchr v2.7.6
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/float_cmp-1931d3e20bddb461.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libfloat_cmp-1931d3e20bddb461.rmeta","emit":"metadata"}
+    Checking simdutf8 v0.1.5
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/memchr-0f957f453f209228.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/simdutf8-0b709d8335d9b8b1.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libsimdutf8-0b709d8335d9b8b1.rmeta","emit":"metadata"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libserde_core-a2e8d86d3fae8a7e.rmeta","emit":"metadata"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libmemchr-0f957f453f209228.rmeta","emit":"metadata"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/serde_json-999944cae28e65b8.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libsyn-7f726ccff118ceef.rmeta","emit":"metadata"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libserde_json-999944cae28e65b8.rmeta","emit":"metadata"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libsyn-7f726ccff118ceef.rlib","emit":"link"}
+   Compiling serde_derive v1.0.228
+   Compiling ref-cast-impl v1.0.25
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/ref_cast_impl-0bc87b7d85e00348.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/serde_derive-3110ba395a169cb6.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libref_cast_impl-0bc87b7d85e00348.so","emit":"link"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/ref_cast-b74f4761de77917f.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libref_cast-b74f4761de77917f.rmeta","emit":"metadata"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libserde_derive-3110ba395a169cb6.so","emit":"link"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/serde-48f457194bfccbe9.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libserde-48f457194bfccbe9.rmeta","emit":"metadata"}
+    Checking halfbrown v0.4.0
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/halfbrown-1d64617077a8342c.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libhalfbrown-1d64617077a8342c.rmeta","emit":"metadata"}
+    Checking value-trait v0.12.0
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/value_trait-845ff8b116936d11.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libvalue_trait-845ff8b116936d11.rmeta","emit":"metadata"}
+    Checking simd-json v0.17.0 (/home/touyou/workspace/unsafe_study/targets/simd-json)
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/simd_json-f55df645c3a4b852.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/simd-json/target/debug/deps/libsimd_json-f55df645c3a4b852.rmeta","emit":"metadata"}
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 8.65s
+    Scanning done
+WARNING: Dependency file was never scanned: /home/touyou/workspace/unsafe_study/targets/simd-json/README.md
+
+Metric output format: x/y
+    x = unsafe code used by the build
+    y = total unsafe code found in the crate
+
+Symbols:
+    :) = No `unsafe` usage found, declares #![forbid(unsafe_code)]
+    ?  = No `unsafe` usage found, missing #![forbid(unsafe_code)]
+    !  = `unsafe` usage found
+
+Functions  Expressions  Impls  Traits  Methods  Dependency
+
+7/10       1626/2520    2/2    0/0     47/68    !  simd-json 0.17.0
+0/0        0/0          0/0    0/0     0/0      ?  ├── getopts 0.2.24
+0/0        0/0          0/0    0/0     0/0      :) │   └── unicode-width 0.2.2
+0/0        115/116      10/10  0/0     3/3      !  ├── halfbrown 0.4.0
+1/1        1299/1513    19/22  1/1     72/85    !  │   ├── hashbrown 0.16.0
+2/3        819/903      12/13  1/1     28/32    !  │   │   ├── allocator-api2 0.2.21
+0/0        0/5          0/0    0/0     0/0      ?  │   │   │   └── serde 1.0.228
+0/0        5/5          0/0    0/0     0/0      !  │   │   │       ├── serde_core 1.0.228
+0/0        0/0          0/0    0/0     0/0      ?  │   │   │       └── serde_derive 1.0.228
+0/0        14/14        0/0    0/0     3/3      !  │   │   │           ├── proc-macro2 1.0.101
+0/0        4/4          0/0    0/0     0/0      !  │   │   │           │   └── unicode-ident 1.0.19
+0/0        0/0          0/0    0/0     0/0      ?  │   │   │           ├── quote 1.0.41
+0/0        14/14        0/0    0/0     3/3      !  │   │   │           │   └── proc-macro2 1.0.101
+0/0        88/88        3/3    0/0     2/2      !  │   │   │           └── syn 2.0.106
+0/0        14/14        0/0    0/0     3/3      !  │   │   │               ├── proc-macro2 1.0.101
+0/0        0/0          0/0    0/0     0/0      ?  │   │   │               ├── quote 1.0.41
+0/0        4/4          0/0    0/0     0/0      !  │   │   │               └── unicode-ident 1.0.19
+0/0        0/0          0/0    0/0     0/0      ?  │   │   ├── equivalent 1.0.2
+2/2        202/202      1/1    0/0     0/0      !  │   │   ├── foldhash 0.2.0
+0/6        0/667        0/5    0/0     0/3      ?  │   │   ├── rayon 1.11.0
+0/0        0/2          0/0    0/0     0/0      ?  │   │   │   ├── either 1.15.0
+0/0        0/5          0/0    0/0     0/0      ?  │   │   │   │   └── serde 1.0.228
+0/7        0/566        0/5    0/0     0/30     ?  │   │   │   └── rayon-core 1.13.0
+0/0        0/457        0/6    0/0     0/6      ?  │   │   │       ├── crossbeam-deque 0.8.6
+0/3        0/438        0/11   0/0     0/29     ?  │   │   │       │   ├── crossbeam-epoch 0.9.18
+0/4        0/75         0/16   0/0     0/3      ?  │   │   │       │   │   └── crossbeam-utils 0.8.21
+0/4        0/75         0/16   0/0     0/3      ?  │   │   │       │   └── crossbeam-utils 0.8.21
+0/4        0/75         0/16   0/0     0/3      ?  │   │   │       └── crossbeam-utils 0.8.21
+0/0        0/5          0/0    0/0     0/0      ?  │   │   └── serde 1.0.228
+0/0        0/5          0/0    0/0     0/0      ?  │   └── serde 1.0.228
+0/0        0/124        0/9    0/0     0/5      ?  ├── once_cell 1.21.3
+0/0        0/0          2/2    2/2     0/0      !  ├── ref-cast 1.0.25
+0/0        0/0          0/0    0/0     0/0      ?  │   └── ref-cast-impl 1.0.25
+0/0        14/14        0/0    0/0     3/3      !  │       ├── proc-macro2 1.0.101
+0/0        0/0          0/0    0/0     0/0      ?  │       ├── quote 1.0.41
+0/0        88/88        3/3    0/0     2/2      !  │       └── syn 2.0.106
+0/0        0/5          0/0    0/0     0/0      ?  ├── serde 1.0.228
+0/0        75/78        0/0    0/0     0/0      !  ├── serde_json 1.0.145
+0/0        8/8          0/0    0/0     0/0      !  │   ├── itoa 1.0.15
+27/41      1973/2421    2/2    0/0     109/147  !  │   ├── memchr 2.7.6
+0/2        0/18         0/1    0/0     0/0      ?  │   │   └── log 0.4.28
+0/0        0/5          0/0    0/0     0/0      ?  │   │       └── serde 1.0.228
+7/9        572/702      0/0    0/0     2/2      !  │   ├── ryu 1.0.20
+0/0        5/5          0/0    0/0     0/0      !  │   └── serde_core 1.0.228
+18/28      347/583      0/0    0/0     36/72    !  ├── simdutf8 0.1.5
+6/6        215/215      0/0    0/0     0/0      !  └── value-trait 0.12.0
+0/0        0/0          0/0    0/0     0/0      ?      ├── float-cmp 0.10.0
+0/0        0/0          0/0    0/0     0/0      ?      │   └── num-traits 0.2.19
+0/0        115/116      10/10  0/0     3/3      !      ├── halfbrown 0.4.0
+1/1        1299/1513    19/22  1/1     72/85    !      ├── hashbrown 0.16.0
+0/0        8/8          0/0    0/0     0/0      !      ├── itoa 1.0.15
+7/9        572/702      0/0    0/0     2/2      !      └── ryu 1.0.20
+
+70/122     7362/11724   51/108 4/4     302/490
+
+error: Found 1 warnings

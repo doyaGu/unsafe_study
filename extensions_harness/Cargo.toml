@@ -1,0 +1,15 @@
+[package]
+name = "extensions_harness"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+memchr = { path = "../targets/memchr" }
+toml_parser = { path = "../targets/toml_parser", features = ["unsafe"] }
+winnow = { path = "../targets/winnow" }
+simd-json = { path = "../targets/simd-json" }
+quick-xml = { path = "../targets/quick-xml" }
+goblin = { path = "../targets/goblin" }
+toml_edit = { path = "../targets/toml_edit" }
+pulldown-cmark = { path = "../targets/pulldown-cmark" }
+roxmltree = { path = "../targets/roxmltree" }

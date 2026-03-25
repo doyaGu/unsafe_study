@@ -1,0 +1,22 @@
+     Removed 11 files, 7.5MiB total
+    Checking memchr v2.8.0 (/home/touyou/workspace/unsafe_study/targets/memchr)
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/memchr/target/debug/deps/memchr-2ea7ed4553cabb1c.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/memchr/target/debug/deps/libmemchr-2ea7ed4553cabb1c.rmeta","emit":"metadata"}
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.57s
+    Scanning done
+
+Metric output format: x/y
+    x = unsafe code used by the build
+    y = total unsafe code found in the crate
+
+Symbols:
+    :) = No `unsafe` usage found, declares #![forbid(unsafe_code)]
+    ?  = No `unsafe` usage found, missing #![forbid(unsafe_code)]
+    !  = `unsafe` usage found
+
+Functions  Expressions  Impls  Traits  Methods  Dependency
+
+27/41      1973/2421    2/2    0/0     109/147  !  memchr 2.8.0
+
+27/41      1973/2421    2/2    0/0     109/147
+

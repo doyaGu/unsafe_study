@@ -1,0 +1,83 @@
+     Removed 53 files, 11.1MiB total
+    Checking hashbrown v0.16.0
+    Checking winnow v0.7.13
+    Checking equivalent v1.0.2
+    Checking toml_writer v1.0.6+spec-1.1.0
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/toml_edit/target/debug/deps/equivalent-dbd0be9061b7acbc.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/toml_edit/target/debug/deps/libequivalent-dbd0be9061b7acbc.rmeta","emit":"metadata"}
+    Checking toml_datetime v1.0.0+spec-1.1.0
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/toml_edit/target/debug/deps/toml_writer-a1a1d6e92f7792c1.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/toml_edit/target/debug/deps/hashbrown-14a51d3705e84ead.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/toml_edit/target/debug/deps/toml_datetime-9c9be604265b4ac1.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/toml_edit/target/debug/deps/libtoml_writer-a1a1d6e92f7792c1.rmeta","emit":"metadata"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/toml_edit/target/debug/deps/winnow-d407b87cd2ae4ace.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/toml_edit/target/debug/deps/libtoml_datetime-9c9be604265b4ac1.rmeta","emit":"metadata"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/toml_edit/target/debug/deps/libhashbrown-14a51d3705e84ead.rmeta","emit":"metadata"}
+    Checking indexmap v2.11.4
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/toml_edit/target/debug/deps/indexmap-1dd5229ddbfd6817.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/toml_edit/target/debug/deps/libindexmap-1dd5229ddbfd6817.rmeta","emit":"metadata"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/toml_edit/target/debug/deps/libwinnow-d407b87cd2ae4ace.rmeta","emit":"metadata"}
+    Checking toml_parser v1.0.9+spec-1.1.0
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/toml_edit/target/debug/deps/toml_parser-770f894e445296b3.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/toml_edit/target/debug/deps/libtoml_parser-770f894e445296b3.rmeta","emit":"metadata"}
+    Checking toml_edit v0.25.4+spec-1.1.0 (/home/touyou/workspace/unsafe_study/targets/toml_edit)
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/toml_edit/target/debug/deps/toml_edit-271dfaf6e097e709.d","emit":"dep-info"}
+{"$message_type":"artifact","artifact":"/home/touyou/workspace/unsafe_study/targets/toml_edit/target/debug/deps/libtoml_edit-271dfaf6e097e709.rmeta","emit":"metadata"}
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.76s
+Failed to parse file: /home/touyou/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/erased-serde-0.4.6/src/features_check/error.rs, Syn(Error("expected one of: `fn`, `extern`, `use`, `static`, `const`, `unsafe`, `mod`, `type`, `struct`, `enum`, `union`, `trait`, `auto`, `impl`, `default`, `macro`, identifier, `self`, `super`, `crate`, `::`"), "/home/touyou/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/erased-serde-0.4.6/src/features_check/error.rs") 
+    Scanning done
+
+Metric output format: x/y
+    x = unsafe code used by the build
+    y = total unsafe code found in the crate
+
+Symbols:
+    :) = No `unsafe` usage found, declares #![forbid(unsafe_code)]
+    ?  = No `unsafe` usage found, missing #![forbid(unsafe_code)]
+    !  = `unsafe` usage found
+
+Functions  Expressions  Impls  Traits  Methods  Dependency
+
+0/0        0/0          0/0    0/0     0/0      ?  toml_edit 0.25.4+spec-1.1.0
+0/1        0/7          0/0    0/0     0/0      ?  ├── anstream 0.6.20
+0/0        0/17         0/0    0/0     0/0      ?  │   ├── anstyle-parse 0.2.7
+0/0        0/1          0/0    0/0     0/0      ?  │   │   └── utf8parse 0.2.2
+0/0        0/22         0/0    0/0     0/0      ?  │   ├── anstyle-query 1.1.4
+0/0        0/6          0/0    0/0     0/0      ?  │   ├── anstyle 1.0.11
+0/0        0/0          0/0    0/0     0/0      ?  │   ├── colorchoice 1.0.4
+0/0        0/0          0/0    0/0     0/0      ?  │   ├── is_terminal_polyfill 1.70.1
+0/0        0/1          0/0    0/0     0/0      ?  │   └── utf8parse 0.2.2
+0/0        0/6          0/0    0/0     0/0      ?  ├── anstyle 1.0.11
+0/0        78/83        0/0    0/0     0/0      !  ├── indexmap 2.11.4
+0/0        0/0          0/0    0/0     0/0      ?  │   ├── equivalent 1.0.2
+1/1        1244/1513    17/22  1/1     72/85    !  │   ├── hashbrown 0.16.0
+0/0        0/0          0/0    0/0     0/0      ?  │   │   ├── equivalent 1.0.2
+0/0        0/0          0/0    0/0     0/0      ?  │   │   └── serde 1.0.225
+0/0        0/5          0/0    0/0     0/0      ?  │   │       ├── serde_core 1.0.225
+0/0        0/0          0/0    0/0     0/0      ?  │   │       └── serde_derive 1.0.225
+0/0        0/14         0/0    0/0     0/3      ?  │   │           ├── proc-macro2 1.0.101
+0/0        0/4          0/0    0/0     0/0      ?  │   │           │   └── unicode-ident 1.0.19
+0/0        0/0          0/0    0/0     0/0      ?  │   │           ├── quote 1.0.40
+0/0        0/14         0/0    0/0     0/3      ?  │   │           │   └── proc-macro2 1.0.101
+0/0        0/88         0/3    0/0     0/2      ?  │   │           └── syn 2.0.106
+0/0        0/14         0/0    0/0     0/3      ?  │   │               ├── proc-macro2 1.0.101
+0/0        0/0          0/0    0/0     0/0      ?  │   │               ├── quote 1.0.40
+0/0        0/4          0/0    0/0     0/0      ?  │   │               └── unicode-ident 1.0.19
+0/0        0/5          0/0    0/0     0/0      ?  │   └── serde_core 1.0.225
+0/0        0/5          0/0    0/0     0/0      ?  ├── serde_core 1.0.225
+0/0        0/0          0/0    0/0     0/0      :) ├── toml_datetime 1.0.0+spec-1.1.0
+0/0        0/5          0/0    0/0     0/0      ?  │   └── serde_core 1.0.225
+0/0        72/72        0/0    0/0     8/8      !  ├── toml_parser 1.0.9+spec-1.1.0
+0/1        0/7          0/0    0/0     0/0      ?  │   ├── anstream 0.6.20
+0/0        0/6          0/0    0/0     0/0      ?  │   ├── anstyle 1.0.11
+0/0        68/72        0/0    0/0     16/18    !  │   └── winnow 0.7.13
+0/0        0/6          0/0    0/0     0/0      ?  │       ├── anstyle 1.0.11
+0/0        0/0          0/0    0/0     0/0      ?  │       ├── is_terminal_polyfill 1.70.1
+0/41       0/2421       0/2    0/0     0/147    ?  │       └── memchr 2.7.5
+0/2        0/18         0/1    0/0     0/0      ?  │           └── log 0.4.28
+0/0        0/0          0/0    0/0     0/0      ?  │               └── serde 1.0.225
+0/0        0/0          0/0    0/0     0/0      :) ├── toml_writer 1.0.6+spec-1.1.0
+0/0        68/72        0/0    0/0     16/18    !  └── winnow 0.7.13
+
+1/45       1462/4343    17/28  1/1     96/263
+

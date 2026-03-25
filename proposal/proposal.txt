@@ -1,0 +1,164 @@
+CSE 5349 Project Proposal:
+Finding and Understanding unsafe-Related Failures in Real Rust Crates
+with Hotspot Mining, Miri, and Fuzzing
+
+Author: TBD
+
+
+SUMMARY
+
+We will run a case study on several real-world, input-facing Rust crates
+(e.g., a parser, decoder, or deserializer) to see how their unsafe code can
+fail. Specifically, we will:
+
+  1. Map unsafe "hotspots" in each crate and its dependency graph.
+  2. Run each crate's test suite under Miri to catch undefined behavior (UB)
+     from violated unsafe assumptions.
+  3. Write 1-3 coverage-guided fuzz targets per crate around input-facing APIs
+     to hunt for panics, crashes, and edge cases.
+  4. Write up where unsafe appears, what broke (if anything), and how Miri and
+     fuzzing each performed across the crates.
+
+
+MOTIVATION
+
+Rust prevents many memory safety bugs at compile time, but unsafe is a
+deliberate escape hatch. Code inside unsafe blocks can do fast, low-level work
+or call into C, at the cost of extra invariants the compiler will not check.
+Evans et al. found that most crates avoid writing unsafe directly but still
+pull it in through dependencies [1]. Astrauskas et al. studied how programmers
+actually use unsafe and how often those uses are sound [2]. Qin et al.
+cataloged real memory and thread safety bugs in Rust programs, many tied to
+unsafe regions [3]. On the tooling side, RUDRA [4] finds unsafe-related bugs
+at ecosystem scale, and Miri [5] interprets Rust at the MIR level to detect UB
+on executed paths.
+
+We want to bring these ideas down to a handful of real crates and ask a
+concrete question: for each library, where does unsafe risk actually sit, and
+what do we learn by throwing Miri and a fuzzer at it in a controlled setup?
+
+
+PROBLEM STATEMENT
+
+Given a set of real Rust crates and their dependency closures:
+
+  - It is hard to tell where the most security-relevant unsafe code lives --
+    whether it is in a crate itself or buried in a dependency.
+  - Miri and fuzzing catch different kinds of problems (UB on executed paths
+    vs. panics from unexpected inputs), but for any given crate it is not
+    obvious which tool will find what, and comparing across multiple crates
+    gives us a broader picture.
+  - We want a project that is small enough for a semester but still goes beyond
+    building an application.
+
+
+GOALS
+
+G1: Produce an unsafe hotspot map for each target crate, including
+    dependencies.
+
+G2: Run Miri and fuzzing on each crate. Record any findings with minimal
+    reproducers.
+
+G3: Compare what each tool found and what it missed, across the target crates.
+
+
+APPROACH
+
+Target Selection
+----------------
+Choose several crates, each satisfying:
+
+  - has an input-driven API suitable for fuzzing (e.g., parse/decode/from_bytes),
+  - has a test suite that runs reliably on a pinned toolchain,
+  - contains some unsafe, either directly or through a key dependency.
+
+We will shortlist candidates and finalize based on a quick unsafe scan.
+
+Step A: Hotspot Mining
+----------------------
+Run cargo-geiger on each target crate to count and locate unsafe usage across
+its dependency graph. Output: a ranked list of the modules and dependencies
+with the most unsafe, per crate.
+
+Step B: Miri on Existing Tests
+------------------------------
+Run each crate's tests under Miri. If Miri reports UB, minimize it into a
+short reproducer and trace it back to the responsible code. Even a single Miri
+finding shows that an unsafe assumption can actually be violated under normal
+test inputs.
+
+Step C: Coverage-Guided Fuzzing
+-------------------------------
+Write 1-3 fuzz targets per crate with cargo-fuzz, pointed at the most
+input-facing entry points (e.g., parse/decode). For each target:
+
+  - seed the corpus with a handful of valid and near-valid inputs,
+  - run fuzzing for a fixed time budget,
+  - triage crashes and panics, minimize inputs,
+  - record stack traces and likely root cause (whether unsafe-related or not).
+
+Step D: Reporting
+-----------------
+Write a short case study report and a reproducible artifact (scripts +
+instructions to rerun everything).
+
+
+IMPLEMENTATION PLAN
+
+  - A runner script that reproduces:
+      - the cargo-geiger scan and hotspot summary,
+      - cargo miri test for selected test targets,
+      - cargo fuzz run for each fuzz target with time budget.
+  - 1-3 fuzz harnesses.
+
+
+EVALUATION
+
+This is a case study, so we evaluate on clarity and evidence:
+
+  1. Hotspot summary: where unsafe lives, ranked by concentration.
+  2. Tool outcomes: did Miri find UB? Did fuzzing find crashes or panics within
+     the time budget?
+  3. For each issue found (if any): a minimal reproducer and a short root-cause
+     explanation.
+  4. A comparison of Miri vs. fuzzing across the target crates, with practical
+     notes on effort and limitations.
+  5. Reproducibility: scripts and instructions for rerunning the whole study.
+
+If we find no bugs, the project is still useful as long as it produces clear
+hotspot maps and an honest Miri-vs-fuzz comparison across real crates.
+
+
+QUESTIONS FOR MIKE
+
+  - Do you have target crate suggestions? (Mid-sized, input-facing, some
+    unsafe, decent tests.)
+  - Is a case study with a tool comparison a sufficient outcome, even if we
+    find nothing exploitable?
+
+
+REFERENCES
+
+[1] Ana Nora Evans, Bradford Campbell, and Mary Lou Soffa. "Is Rust Used
+    Safely by Software Developers?" In ICSE, 2020.
+    https://www.cs.virginia.edu/~bjc8c/papers/evans20rust.pdf
+
+[2] Vytautas Astrauskas, Darrell Matheja, Federico Poli, and Alexander J.
+    Summers. "How Do Programmers Use Unsafe Rust?" Proc. ACM Program. Lang.
+    (OOPSLA), 2020.
+    https://pm.inf.ethz.ch/publications/AstrauskasMathejaMuellerPoliSummers20.pdf
+
+[3] Boqin Qin, Yilun Chen, Zeming Yu, Linhai Song, and Yiying Zhang.
+    "Understanding Memory and Thread Safety Practices and Issues in Real-World
+    Rust Programs." In PLDI, 2020.
+    https://cseweb.ucsd.edu/~yiying/RustStudy-PLDI20.pdf
+
+[4] Yechan Bae, Youngsok Kim, Ammar Askar, Jungwon Lim, and Taesoo Kim.
+    "RUDRA: Finding Memory Safety Bugs in Rust at the Ecosystem Scale." In
+    SOSP, 2021.
+    https://gts3.org/assets/papers/2021/bae:rudra.pdf
+
+[5] Ralf Jung, Benjamin Kimock, Christian Poveda, Eduardo Sanchez Munoz, Oli Scherer, and Qian Wang. "Miri: Practical Undefined Behavior Detection for Rust."
+    Proc. ACM Program. Lang. (POPL), 2026.
+    https://research.ralfj.de/papers/2026-popl-miri.pdf
