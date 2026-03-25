@@ -79,6 +79,24 @@ an upstream-ready issue draft at `report/simd_json_upstream_issue_draft.md`.
   `geiger_reports/`, and `miri_reports/` remain tracked by default.
 - For ongoing status and only-remaining decisions, see `REMAINING_TASKS.md`.
 
+## Commit Scope Policy
+
+Commit:
+- Source and automation: `scripts/`, `extensions_harness/src`, `extensions_harness/tests`
+- Reproducibility inputs: `fuzz_corpus/`, `fuzz_targets/`, `rust-toolchain.toml`
+- Study outputs and analysis: `geiger_reports/`, `miri_reports/*.md`, `report/`, `README.md`
+- Proposal sources: `proposal/*.md`, `proposal/*.tex`, `proposal/*.txt`
+
+Do not commit:
+- Upstream clone cache: `targets/`
+- Build outputs and runtime artifacts: `**/target/`, `**/fuzz/artifacts/`, `**/fuzz/coverage/`
+- Local temporary/noise files: `*.log`, `tmp/`, IDE configs, swap files
+- LaTeX intermediates: `*.aux`, `*.fdb_latexmk`, `*.fls`, `*.out`, `*.synctex.gz`
+
+Conditional:
+- `proposal/proposal.pdf` can be committed for release snapshots; otherwise
+  regenerate from source when needed.
+
 ## Pipeline Phases
 
 1. **Phase 1 — Crate Selection**: cargo-geiger feasibility scan, Miri dry run
