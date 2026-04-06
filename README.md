@@ -12,7 +12,7 @@ CSE 5349 project: hotspot mining, Miri, and coverage-guided fuzzing on real-worl
 
 ## Quick Start
 
-```powershell
+```bash
 # 1. Install the pinned nightly toolchain (reads rust-toolchain.toml)
 rustup show
 
@@ -20,8 +20,13 @@ rustup show
 cargo install cargo-geiger
 cargo install cargo-fuzz
 
-# 3. Run the full study pipeline
-.\scripts\run_all.ps1
+# 3. Run the full study pipeline (Linux required for fuzzing)
+bash scripts/run_all.sh
+
+# Or run individual phases
+bash scripts/run_all.sh --skip-fuzz       # Geiger + Miri only
+bash scripts/run_all.sh --skip-geiger --skip-miri  # Fuzz only
+bash scripts/run_fuzz.sh httparse parse_request 300  # Single target
 ```
 
 ## Directory Layout
@@ -30,15 +35,16 @@ cargo install cargo-fuzz
 unsafe_study/
 |-- rust-toolchain.toml   # pinned nightly for Miri + cargo-fuzz
 |-- README.md
-|-- targets/              # git clones of target crates
+|-- targets/              # git clones of target crates (not committed)
 |-- geiger_reports/       # cargo-geiger JSON output + annotations
-|-- miri_reports/         # Miri test logs + reproducers
+|-- miri_reports/         # Miri test logs + triage documents
 |-- fuzz_targets/         # fuzz harness source per crate
 |-- fuzz_corpus/          # seed corpus per crate/target
 |-- fuzz_findings/        # minimized crash artifacts
 |-- extensions_harness/   # offline Miri/test harness for extension crates
-|-- scripts/              # automation (run_all.ps1, summarize_geiger.py)
-|-- report/               # final write-up, figures, crate_selection.md
+|-- scripts/              # automation (run_all.sh, run_fuzz.sh, summarize_geiger.py)
+|-- report/               # final write-up, explainers, crate_selection.md
+|-- proposal/             # CSE 5349 proposal (.md, .tex, .pdf)
 ```
 
 ## Toolchain
@@ -50,25 +56,36 @@ unsafe_study/
 
 ## Target Crates
 
+### Baseline (Tier 1 -- full depth)
+
 | Crate | Domain | Selection Rationale |
 |-------|--------|---------------------|
 | `httparse` | HTTP parsing | Small, perf-critical, direct `unsafe` in hot path |
 | `serde_json` | JSON deserialization | Ubiquitous; `unsafe` in hot path + via `serde` |
 | `bstr` | Byte strings | `unsafe` for UTF-8 boundary tricks; input-facing |
 
-> Additional candidates: `image`, `regex-automata`. Final selection depends on
-> cargo-geiger scan and Miri compatibility checks.
+### Extension Batch (Tier 2 -- targeted depth, added 2026-03-11)
 
-Additional target batch (2026-03-11): `memchr`, `winnow`, `toml_parser`,
-`simd-json`, `quick-xml`, `goblin`, `toml_edit`, `pulldown-cmark`, and
-`roxmltree` were added as a unified follow-on intake. Geiger still runs per
-crate in `targets/`, Miri for this batch is exercised through targeted tests in
-`extensions_harness/`, and each crate now has a crate-local `cargo-fuzz`
-harness under `targets/<crate>/fuzz/`.
+| Crate | Domain | Selection Rationale |
+|-------|--------|---------------------|
+| `memchr` | Byte/substring search | Shared SIMD dependency of serde_json and bstr |
+| `simd-json` | SIMD JSON parsing | Direct comparison to serde_json; heavy `unsafe` |
+| `quick-xml` | Streaming XML | `#![forbid(unsafe_code)]`; safe-Rust control case |
+| `winnow` | Parser combinators | Zero-copy slice `unsafe`, different from SIMD style |
+| `toml_parser` | TOML lexing/parsing | Opt-in `unsafe` feature gate |
+| `goblin` | Binary format parsing | Alignment/endianness/layout `unsafe` patterns |
+| `toml_edit` | Format-preserving TOML | Zero direct `unsafe`; safe-Rust control case |
+| `pulldown-cmark` | CommonMark parsing | `unsafe` behind optional `simd` feature only |
+| `roxmltree` | Read-only XML tree | `#![forbid(unsafe_code)]`; negative control |
 
-The deepest added-target finding is `simd-json`: the study now includes a
-crate-local Miri triage, a local mitigation based on input-handle reuse, and
-an upstream-ready issue draft at `report/simd_json_upstream_issue_draft.md`.
+Geiger runs per crate in `targets/`, Miri for the extension batch is exercised
+through targeted tests in `extensions_harness/`, and each crate has a
+crate-local `cargo-fuzz` harness under `targets/<crate>/fuzz/`.
+
+The deepest added-target finding is `simd-json`: the study includes a
+crate-local Miri triage, a local mitigation based on input-handle reuse, a
+technical explainer at `report/simd_json_stacked_borrows_explainer.md`, and an
+upstream-ready issue draft at `report/simd_json_upstream_issue_draft.md`.
 
 ## Repository Notes
 
@@ -106,5 +123,6 @@ Conditional:
 
 ## Reproducing
 
-All steps are automated by `scripts/run_all.ps1`. See the script header for
-parameter documentation. The script generates a Markdown report in `report/`.
+All steps are automated by `scripts/run_all.sh` (Linux). See the script
+header for parameter documentation. The script generates a Markdown report
+in `report/`.
