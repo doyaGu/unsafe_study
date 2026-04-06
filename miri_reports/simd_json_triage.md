@@ -93,6 +93,9 @@ use the temporary `buffer` for escape handling, they copy the normalized bytes
 back into the mutable input and return `&str` slices into that same input
 region. So all parsed strings ultimately alias the mutable input.
 
+For a detailed, fact-checked walkthrough of the Stacked Borrows mechanism
+behind this finding, see `report/simd_json_stacked_borrows_explainer.md`.
+
 ## Experimental Fix Direction
 
 An experimental one-line change in `src/stage2.rs` hoists

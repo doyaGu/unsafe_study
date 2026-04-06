@@ -180,7 +180,7 @@ because the reduction is consistent and the mitigation direction is concrete.
 
 ## Local study references
 
+- stacked borrows technical explainer: `report/simd_json_stacked_borrows_explainer.md`
 - focused triage note: `miri_reports/simd_json_triage.md`
 - hotspot notes: `geiger_reports/simd-json_annotations.md`
-- current study report: `report/study_report.md`
 - final report: `report/final_report.md`
