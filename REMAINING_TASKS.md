@@ -1,16 +1,18 @@
 # Remaining Tasks -- Unsafe Study Project
 
-Last updated: 2026-03-24
+Last updated: 2026-04-06
 
 ## Current Situation
 
 - End-to-end study outputs are complete and archived in `report/final_report.md`.
 - Baseline crate set (`httparse`, `serde_json`, `bstr`) and extension batch
   outputs exist for hotspot scan, Miri, and fuzzing.
-- `simd-json` has a focused triage note in `miri_reports/simd_json_triage.md`
-  and an upstream-ready draft in `report/simd_json_upstream_issue_draft.md`.
+- `simd-json` has a focused triage note in `miri_reports/simd_json_triage.md`,
+  a fact-checked technical explainer at
+  `report/simd_json_stacked_borrows_explainer.md`, and an upstream-ready draft
+  in `report/simd_json_upstream_issue_draft.md`.
 - Repository has been initialized as a local Git repo on `main` with root
-  `.gitignore`.
+  `.gitignore` and pushed to remote.
 
 ## Remaining Decisions (Actual Open Items)
 
