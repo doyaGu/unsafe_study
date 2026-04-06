@@ -9,11 +9,11 @@ produced two non-clean results.
 - Classification: panic
 - Trigger site: `targets/toml_edit/src/parser/document.rs:547`
 - Panic message: `all items have spans`
-- Artifact:
+- Original crash artifact:
   `targets/toml_edit/fuzz/artifacts/toml_edit_parse/crash-bfa99aad83fb6f70dc04597a15164d1e7a80b9c4`
-- Minimized reproducer:
+- Minimized reproducer (9 bytes):
   `targets/toml_edit/fuzz/artifacts/toml_edit_parse/reproducer-min-9b`
-- Minimized bytes: `3d 5b 7b 7b 7d ff 7b 0d 2e`
+- Minimized bytes (hex): `3d 5b 7b 7b 7d ff 7b 0d 2e`
 
 Observed stack root:
 
