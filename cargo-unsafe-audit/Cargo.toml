@@ -5,10 +5,6 @@ edition = "2021"
 description = "Audit Rust crates for unsafe code: Geiger + Miri + Fuzz + Pattern Analysis"
 
 [[bin]]
-name = "cargo-unsafe-audit"
-path = "src/main.rs"
-
-[[bin]]
 name = "unsafe-audit"
 path = "src/main.rs"
 
