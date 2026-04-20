@@ -1,25 +1,16 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 // =========================================================================
 // Shared data types for the entire pipeline
 // =========================================================================
 
-/// Which depth of analysis a crate gets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CrateTier {
-    /// Full Miri directly on crate tests (httparse, serde_json, bstr)
-    Tier1,
-    /// Miri via extensions_harness with targeted test functions
-    Tier2,
-}
-
-/// A single crate being audited.
+/// Per-crate configuration, loaded from unsafe-audit.toml or auto-discovered.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrateTarget {
     pub name: String,
     pub dir: PathBuf,
-    pub tier: CrateTier,
 }
 
 // ---- Phase 1: Geiger ----
@@ -41,52 +32,31 @@ impl GeigerMetrics {
             + self.item_traits.unsafe_
             + self.methods.unsafe_
     }
-
-    pub fn total_safe(&self) -> u64 {
-        self.functions.safe
-            + self.exprs.safe
-            + self.item_impls.safe
-            + self.item_traits.safe
-            + self.methods.safe
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CountPair {
     pub safe: u64,
-    /// Named `unsafe_` because `unsafe` is a Rust keyword,
-    /// matching cargo-geiger's JSON field name.
     #[serde(rename = "unsafe_")]
     pub unsafe_: u64,
 }
 
-impl CountPair {
-    pub fn zero() -> Self {
-        Self { safe: 0, unsafe_: 0 }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GeigerResult {
-    pub crate_name: String,
-    pub crate_version: String,
-    /// Unsafe code actually used by the build (reachable from entry points).
-    pub used: GeigerMetrics,
-    /// Unsafe code present but not reachable.
-    pub unused: GeigerMetrics,
-    pub forbids_unsafe: bool,
-}
-
 // ---- Phase 2: Miri ----
 
+/// Describes how Miri should be invoked for a specific crate.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MiriMode {
-    /// `cargo miri test` run directly in the crate directory.
+    /// `cargo miri test` run directly in the crate's own directory.
     Direct,
-    /// `cargo miri test --test <file> <name> --exact` run via extensions_harness.
-    Harness {
+    /// `cargo miri test --test <file> [test_name] -- [--exact]`
+    /// run in an external harness workspace.
+    ExternalTest {
+        /// Directory containing the harness Cargo.toml.
+        harness_dir: PathBuf,
+        /// Integration test file name (without .rs).
         test_file: String,
-        test_name: String,
+        /// Specific test function name. If None, run all tests in the file.
+        test_name: Option<String>,
     },
 }
 
@@ -157,7 +127,6 @@ pub struct CrateAuditResult {
 }
 
 impl CrateAuditResult {
-    /// Human-readable fuzz summary.
     pub fn fuzz_summary(&self) -> String {
         if self.fuzz.is_empty() {
             return "SKIPPED".into();
@@ -170,10 +139,123 @@ impl CrateAuditResult {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeigerResult {
+    pub crate_name: String,
+    pub crate_version: String,
+    pub used: GeigerMetrics,
+    pub unused: GeigerMetrics,
+    pub forbids_unsafe: bool,
+}
+
 // ---- Full study report ----
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StudyReport {
     pub timestamp: String,
     pub crates: Vec<CrateAuditResult>,
+}
+
+// =========================================================================
+// Configuration file: unsafe-audit.toml
+// =========================================================================
+
+/// Top-level configuration file. All fields optional.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields, default)]
+pub struct AuditConfig {
+    /// Miri configuration.
+    #[serde(default)]
+    pub miri: MiriConfig,
+
+    /// Fuzz configuration.
+    #[serde(default)]
+    pub fuzz: FuzzConfig,
+
+    /// Per-crate overrides. Key = crate name.
+    #[serde(default)]
+    pub crate_overrides: HashMap<String, CrateOverride>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct MiriConfig {
+    /// Extra flags passed via MIRIFLAGS.
+    pub extra_flags: String,
+
+    /// Path to an external harness workspace.
+    /// If set, the tool scans its tests/ directory to discover test→crate mappings.
+    pub harness_dir: Option<PathBuf>,
+
+    /// Explicit crate→test mappings. Takes priority over auto-discovery.
+    /// Each entry: { test_file = "...", test_name = "..." (optional) }
+    #[serde(default)]
+    pub harness_map: HashMap<String, HarnessMapping>,
+}
+
+impl Default for MiriConfig {
+    fn default() -> Self {
+        Self {
+            extra_flags: "-Zmiri-symbolic-alignment-check -Zmiri-strict-provenance".into(),
+            harness_dir: None,
+            harness_map: HashMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct HarnessMapping {
+    /// Integration test file name (without .rs) in the harness workspace.
+    pub test_file: String,
+    /// Specific test function. If omitted, all tests in the file are run.
+    pub test_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct FuzzConfig {
+    /// Seconds to run each fuzz target (default 60).
+    pub time_per_target: u64,
+    /// Extra environment variables (KEY=VALUE pairs).
+    pub env: Vec<String>,
+}
+
+impl Default for FuzzConfig {
+    fn default() -> Self {
+        Self {
+            time_per_target: 60,
+            env: vec![
+                "CARGO_NET_OFFLINE=true".into(),
+                "ASAN_OPTIONS=detect_odr_violation=0:detect_leaks=0".into(),
+            ],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct CrateOverride {
+    /// Override Miri mode for this specific crate.
+    pub miri_harness: Option<HarnessMapping>,
+}
+
+impl AuditConfig {
+    pub fn load(path: &std::path::Path) -> anyhow::Result<Self> {
+        let content = std::fs::read_to_string(path)?;
+        let config: Self = toml::from_str(&content)?;
+        Ok(config)
+    }
+
+    /// Try to find a config file: first at `dir/unsafe-audit.toml`,
+    /// then walk up parent directories.
+    pub fn discover(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+        let mut current = dir.to_path_buf();
+        loop {
+            let candidate = current.join("unsafe-audit.toml");
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+            current = current.parent()?.to_path_buf();
+        }
+    }
 }

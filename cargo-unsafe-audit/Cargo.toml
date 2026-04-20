@@ -22,7 +22,5 @@ serde_json = "1"
 anyhow = "1"
 walkdir = "2"
 colored = "2"
-indicatif = "0.17"
 chrono = { version = "0.4", features = ["serde"] }
-strum = "0.26"
-strum_macros = "0.26"
+toml = "0.8"

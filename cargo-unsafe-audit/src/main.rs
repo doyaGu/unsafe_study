@@ -1,11 +1,15 @@
 //! cargo-unsafe-audit: Audit Rust crates for unsafe code.
 //!
-//! Faithfully wraps the three-phase study pipeline:
-//!   Phase 1: Geiger (hotspot mining)
-//!   Phase 2: Miri  (UB detection)
-//!   Phase 3: Fuzz  (crash/panic discovery)
-//!   Phase 4: Pattern analysis (optional, syn-based)
+//! Pipeline:
+//!   Phase 1: Geiger   (unsafe hotspot mining)
+//!   Phase 2: Miri     (UB detection)
+//!   Phase 3: Fuzz     (crash/panic discovery)
+//!   Phase 4: Patterns (syn AST classification, optional)
 //!   Phase 5: Report generation
+//!
+//! Configuration: reads `unsafe-audit.toml` from the working directory
+//! or any parent directory. All settings are optional; sensible defaults
+//! are used when no config file exists.
 
 mod analyzer;
 mod fuzz;
@@ -28,16 +32,20 @@ use std::path::{Path, PathBuf};
     name = "cargo-unsafe-audit",
     bin_name = "cargo-unsafe-audit",
     about = "Audit Rust crates for unsafe code: Geiger + Miri + Fuzz + Pattern Analysis",
-    version,
+    version
 )]
 struct Cli {
-    /// Path to a single crate directory, or a targets/ directory containing multiple crates.
+    /// Path to a single crate directory, or a directory containing multiple crates.
     #[arg(value_name = "PATH")]
     path: Option<PathBuf>,
 
-    /// Study mode: audit all crates found in the targets/ directory.
+    /// Treat PATH as a directory of crate subdirectories.
     #[arg(long)]
     study: bool,
+
+    /// Path to config file (default: auto-discover unsafe-audit.toml).
+    #[arg(long)]
+    config: Option<PathBuf>,
 
     /// Skip Phase 1 (Geiger).
     #[arg(long)]
@@ -55,9 +63,9 @@ struct Cli {
     #[arg(long)]
     skip_patterns: bool,
 
-    /// Fuzz duration per target in seconds (default: 60).
-    #[arg(long, default_value = "60")]
-    fuzz_time: u64,
+    /// Override fuzz time per target (seconds).
+    #[arg(long)]
+    fuzz_time: Option<u64>,
 
     /// Output directory for reports.
     #[arg(long)]
@@ -81,7 +89,6 @@ struct Cli {
 // =========================================================================
 
 fn main() -> Result<()> {
-    // Handle both `cargo unsafe-audit` and `unsafe-audit` invocation.
     let args: Vec<String> = std::env::args().collect();
     let cli = if args.len() > 1 && args[1] == "unsafe-audit" {
         Cli::parse_from(args.iter().skip(1))
@@ -89,12 +96,12 @@ fn main() -> Result<()> {
         Cli::parse()
     };
 
+    // Resolve crate path
     let path = cli.path.clone().unwrap_or_else(|| PathBuf::from("."));
-    let path = if path.is_absolute() {
-        path
-    } else {
-        std::env::current_dir()?.join(path)
-    };
+    let path = std::env::current_dir()?.join(path);
+
+    // Load config
+    let config = load_config(&path, cli.config.as_deref())?;
 
     // Discover crates
     let crates = discover_crates(&path, cli.study)?;
@@ -108,12 +115,11 @@ fn main() -> Result<()> {
         "unsafe-audit:".bold().cyan(),
         crates.len().to_string().green(),
     );
+    if let Some(ref cfg_path) = cli.config {
+        println!("  {} config: {}", "•".dimmed(), cfg_path.display());
+    }
     for c in &crates {
-        let tier_str = match c.tier {
-            models::CrateTier::Tier1 => "T1".dimmed(),
-            models::CrateTier::Tier2 => "T2".yellow(),
-        };
-        println!("    {} {} [{}]", "•".dimmed(), c.name.bold(), tier_str);
+        println!("    {} {}", "•".dimmed(), c.name.bold());
     }
     println!();
 
@@ -129,11 +135,14 @@ fn main() -> Result<()> {
     std::fs::create_dir_all(&miri_log_dir)?;
     std::fs::create_dir_all(&fuzz_log_dir)?;
 
+    // Fuzz time: CLI override > config > default
+    let fuzz_time = cli.fuzz_time.unwrap_or(config.fuzz.time_per_target);
+
     let mut results: Vec<models::CrateAuditResult> = Vec::new();
 
     for target in &crates {
         println!("{}", format!("━━━ {} ━━━", target.name).bold().cyan());
-        let result = audit_crate(target, &cli, &miri_log_dir, &fuzz_log_dir);
+        let result = audit_crate(target, &cli, &config, &miri_log_dir, &fuzz_log_dir, fuzz_time);
         results.push(result);
         println!();
     }
@@ -159,8 +168,42 @@ fn main() -> Result<()> {
     }
 
     println!();
-    println!("  {} {}", "Done.".bold().green(), format!("({} crates)", report.crates.len()).dimmed());
+    println!(
+        "  {} {}",
+        "Done.".bold().green(),
+        format!("({} crates)", report.crates.len()).dimmed()
+    );
     Ok(())
+}
+
+// =========================================================================
+// Config loading
+// =========================================================================
+
+fn load_config(base_dir: &Path, explicit: Option<&Path>) -> Result<models::AuditConfig> {
+    let config_path = if let Some(p) = explicit {
+        Some(p.to_path_buf())
+    } else {
+        models::AuditConfig::discover(base_dir)
+    };
+
+    match config_path {
+        Some(p) => {
+            println!(
+                "  {} loading config: {}",
+                "unsafe-audit:".bold().cyan(),
+                p.display()
+            );
+            Ok(models::AuditConfig::load(&p)?)
+        }
+        None => {
+            println!(
+                "  {} no config file found, using defaults",
+                "unsafe-audit:".bold().cyan()
+            );
+            Ok(models::AuditConfig::default())
+        }
+    }
 }
 
 // =========================================================================
@@ -168,21 +211,19 @@ fn main() -> Result<()> {
 // =========================================================================
 
 fn discover_crates(path: &Path, study_mode: bool) -> Result<Vec<models::CrateTarget>> {
-    // If path points to a directory with Cargo.toml -> single crate
+    // Single crate mode
     if path.join("Cargo.toml").exists() && !study_mode {
         let name = path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "unknown".into());
-        let tier = determine_tier(&name);
         return Ok(vec![models::CrateTarget {
             name,
             dir: path.to_path_buf(),
-            tier,
         }]);
     }
 
-    // Otherwise treat as targets/ directory
+    // Directory mode: scan for subdirectories with Cargo.toml
     let mut crates = Vec::new();
     for entry in std::fs::read_dir(path)? {
         let entry = entry?;
@@ -192,24 +233,14 @@ fn discover_crates(path: &Path, study_mode: bool) -> Result<Vec<models::CrateTar
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| "unknown".into());
-            let tier = determine_tier(&name);
             crates.push(models::CrateTarget {
                 name,
                 dir: sub,
-                tier,
             });
         }
     }
     crates.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(crates)
-}
-
-fn determine_tier(name: &str) -> models::CrateTier {
-    if miri::harness_for(name).is_some() {
-        models::CrateTier::Tier2
-    } else {
-        models::CrateTier::Tier1
-    }
 }
 
 // =========================================================================
@@ -219,8 +250,10 @@ fn determine_tier(name: &str) -> models::CrateTier {
 fn audit_crate(
     target: &models::CrateTarget,
     cli: &Cli,
+    config: &models::AuditConfig,
     miri_log_dir: &Path,
     fuzz_log_dir: &Path,
+    fuzz_time: u64,
 ) -> models::CrateAuditResult {
     let mut result = models::CrateAuditResult {
         target: target.clone(),
@@ -255,7 +288,7 @@ fn audit_crate(
     // Phase 2: Miri
     if !cli.skip_miri {
         print_phase("Phase 2: Miri");
-        match miri::run_miri(&target.name, &target.dir, miri_log_dir) {
+        match miri::run_miri(&target.name, &target.dir, miri_log_dir, config) {
             Ok(m) => {
                 let status = if m.passed {
                     "CLEAN".green()
@@ -266,7 +299,12 @@ fn audit_crate(
                 };
                 let mode_str = match &m.mode {
                     models::MiriMode::Direct => "direct".dimmed(),
-                    models::MiriMode::Harness { test_file, .. } => format!("harness({})", test_file).yellow(),
+                    models::MiriMode::ExternalTest { test_file, test_name, .. } => {
+                        match test_name {
+                            Some(n) => format!("harness({}::{})", test_file, n).yellow(),
+                            None => format!("harness({})", test_file).yellow(),
+                        }
+                    }
                 };
                 println!(
                     "  {} {} [{}] {:.1}s",
@@ -290,8 +328,8 @@ fn audit_crate(
 
     // Phase 3: Fuzz
     if !cli.skip_fuzz {
-        print_phase(&format!("Phase 3: Fuzz ({}s/target)", cli.fuzz_time));
-        match fuzz::run_fuzz(&target.name, &target.dir, cli.fuzz_time, fuzz_log_dir) {
+        print_phase(&format!("Phase 3: Fuzz ({}s/target)", fuzz_time));
+        match fuzz::run_fuzz(&target.name, &target.dir, fuzz_time, fuzz_log_dir, &config.fuzz) {
             Ok(fuzz_results) => {
                 for f in &fuzz_results {
                     let status_colored = match f.status {
@@ -365,17 +403,17 @@ fn audit_crate(
                 result.pattern_analysis = Some(summary);
             }
             Err(e) => {
-                println!("  {} Pattern analysis: {}", "✗".red(), e.to_string().dimmed());
+                println!(
+                    "  {} Pattern analysis: {}",
+                    "✗".red(),
+                    e.to_string().dimmed()
+                );
             }
         }
     }
 
     result
 }
-
-// =========================================================================
-// Helpers
-// =========================================================================
 
 fn print_phase(name: &str) {
     println!(

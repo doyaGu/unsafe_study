@@ -19,6 +19,7 @@ pub fn run_fuzz(
     crate_dir: &Path,
     fuzz_time: u64,
     log_dir: &Path,
+    config: &crate::models::FuzzConfig,
 ) -> Result<Vec<FuzzTargetResult>> {
     let fuzz_dir = crate_dir.join("fuzz");
     if !fuzz_dir.exists() || !fuzz_dir.join("Cargo.toml").exists() {
@@ -57,6 +58,7 @@ pub fn run_fuzz(
             target,
             fuzz_time,
             log_dir,
+            config,
         );
         results.push(result);
     }
@@ -90,20 +92,27 @@ fn run_single_fuzz_target(
     target: &str,
     fuzz_time: u64,
     log_dir: &Path,
+    config: &crate::models::FuzzConfig,
 ) -> FuzzTargetResult {
     let log_path = log_dir.join(format!("{}_{}.log", crate_name, target));
     let start = Instant::now();
 
-    let output = Command::new("cargo")
-        .args([
+    let mut cmd = Command::new("cargo");
+    cmd.args([
             "fuzz", "run", target,
             "--",
             &format!("-max_total_time={}", fuzz_time),
         ])
-        .current_dir(crate_dir)
-        .env("CARGO_NET_OFFLINE", "true")
-        .env("ASAN_OPTIONS", "detect_odr_violation=0:detect_leaks=0")
-        .output();
+        .current_dir(crate_dir);
+
+    // Apply environment variables from config
+    for env_pair in &config.env {
+        if let Some((key, value)) = env_pair.split_once('=') {
+            cmd.env(key, value);
+        }
+    }
+
+    let output = cmd.output();
 
     let duration = start.elapsed().as_secs();
 

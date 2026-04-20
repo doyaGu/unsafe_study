@@ -1,0 +1,53 @@
+# unsafe-audit.toml — Configuration for the unsafe_study project
+#
+# This file tells cargo-unsafe-audit how to run Miri on crates
+# that can't be tested directly (they need an external harness).
+
+[miri]
+extra_flags = "-Zmiri-symbolic-alignment-check -Zmiri-strict-provenance"
+harness_dir = "extensions_harness"
+
+# Explicit mappings: crate name → test file + test function in the harness.
+# If omitted, the tool auto-discovers by scanning tests/*.rs for `use <crate>`.
+[miri.harness_map.memchr]
+test_file = "more_crates"
+test_name = "memchr_handles_unaligned_public_inputs"
+
+[miri.harness_map.winnow]
+test_file = "more_crates"
+test_name = "winnow_parses_ascii_and_unicode_boundaries"
+
+[miri.harness_map.toml_parser]
+test_file = "more_crates"
+test_name = "toml_parser_lexes_and_parses_nested_inputs"
+
+[miri.harness_map.simd-json]
+test_file = "simd_json_triage"
+test_name = "simd_json_borrowed_value_parses_object_with_strings"
+
+[miri.harness_map.quick-xml]
+test_file = "api_smoke"
+test_name = "quick_xml_streams_events"
+
+[miri.harness_map.goblin]
+test_file = "api_smoke"
+test_name = "goblin_parses_minimal_object_bytes"
+
+[miri.harness_map.toml_edit]
+test_file = "api_smoke"
+test_name = "toml_edit_parses_and_mutates_document"
+
+[miri.harness_map.pulldown-cmark]
+test_file = "api_smoke"
+test_name = "pulldown_cmark_renders_html"
+
+[miri.harness_map.roxmltree]
+test_file = "api_smoke"
+test_name = "roxmltree_builds_tree"
+
+[fuzz]
+time_per_target = 60
+env = [
+    "CARGO_NET_OFFLINE=true",
+    "ASAN_OPTIONS=detect_odr_violation=0:detect_leaks=0",
+]
