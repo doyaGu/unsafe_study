@@ -438,7 +438,7 @@ fn compute_risk_score(patterns: &[PatternCount], files_scanned: usize, total_fin
         return 0.0;
     }
 
-    let density = total_findings as f64 / files_scanned as f64;
+    let _density = total_findings as f64 / files_scanned as f64;
 
     // Weight by pattern severity
     let severity_weight: f64 = patterns.iter().map(|pc| {

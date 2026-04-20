@@ -1,12 +1,11 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 // =========================================================================
-// Shared data types for the entire pipeline
+// Shared data types
 // =========================================================================
 
-/// Per-crate configuration, loaded from unsafe-audit.toml or auto-discovered.
+/// A single crate being audited.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrateTarget {
     pub name: String,
@@ -15,7 +14,7 @@ pub struct CrateTarget {
 
 // ---- Phase 1: Geiger ----
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GeigerMetrics {
     pub functions: CountPair,
     pub exprs: CountPair,
@@ -34,7 +33,7 @@ impl GeigerMetrics {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CountPair {
     pub safe: u64,
     #[serde(rename = "unsafe_")]
@@ -43,26 +42,8 @@ pub struct CountPair {
 
 // ---- Phase 2: Miri ----
 
-/// Describes how Miri should be invoked for a specific crate.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum MiriMode {
-    /// `cargo miri test` run directly in the crate's own directory.
-    Direct,
-    /// `cargo miri test --test <file> [test_name] -- [--exact]`
-    /// run in an external harness workspace.
-    ExternalTest {
-        /// Directory containing the harness Cargo.toml.
-        harness_dir: PathBuf,
-        /// Integration test file name (without .rs).
-        test_file: String,
-        /// Specific test function name. If None, run all tests in the file.
-        test_name: Option<String>,
-    },
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MiriResult {
-    pub mode: MiriMode,
     pub passed: bool,
     pub tests_run: Option<usize>,
     pub tests_passed: Option<usize>,
@@ -115,7 +96,7 @@ pub struct FuzzTargetResult {
     pub log_excerpt: Option<String>,
 }
 
-// ---- Per-crate result (combines all phases) ----
+// ---- Per-crate result ----
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrateAuditResult {
@@ -131,13 +112,15 @@ impl CrateAuditResult {
         if self.fuzz.is_empty() {
             return "SKIPPED".into();
         }
-        let mut parts = Vec::new();
-        for f in &self.fuzz {
-            parts.push(format!("{}: {}", f.target_name, f.status));
-        }
-        parts.join("; ")
+        self.fuzz
+            .iter()
+            .map(|f| format!("{}: {}", f.target_name, f.status))
+            .collect::<Vec<_>>()
+            .join("; ")
     }
 }
+
+// ---- Phase 1 result ----
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeigerResult {
@@ -146,116 +129,13 @@ pub struct GeigerResult {
     pub used: GeigerMetrics,
     pub unused: GeigerMetrics,
     pub forbids_unsafe: bool,
+    pub files_scanned: u64,
 }
 
-// ---- Full study report ----
+// ---- Full report ----
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StudyReport {
     pub timestamp: String,
     pub crates: Vec<CrateAuditResult>,
-}
-
-// =========================================================================
-// Configuration file: unsafe-audit.toml
-// =========================================================================
-
-/// Top-level configuration file. All fields optional.
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(deny_unknown_fields, default)]
-pub struct AuditConfig {
-    /// Miri configuration.
-    #[serde(default)]
-    pub miri: MiriConfig,
-
-    /// Fuzz configuration.
-    #[serde(default)]
-    pub fuzz: FuzzConfig,
-
-    /// Per-crate overrides. Key = crate name.
-    #[serde(default)]
-    pub crate_overrides: HashMap<String, CrateOverride>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
-pub struct MiriConfig {
-    /// Extra flags passed via MIRIFLAGS.
-    pub extra_flags: String,
-
-    /// Path to an external harness workspace.
-    /// If set, the tool scans its tests/ directory to discover test→crate mappings.
-    pub harness_dir: Option<PathBuf>,
-
-    /// Explicit crate→test mappings. Takes priority over auto-discovery.
-    /// Each entry: { test_file = "...", test_name = "..." (optional) }
-    #[serde(default)]
-    pub harness_map: HashMap<String, HarnessMapping>,
-}
-
-impl Default for MiriConfig {
-    fn default() -> Self {
-        Self {
-            extra_flags: "-Zmiri-symbolic-alignment-check -Zmiri-strict-provenance".into(),
-            harness_dir: None,
-            harness_map: HashMap::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct HarnessMapping {
-    /// Integration test file name (without .rs) in the harness workspace.
-    pub test_file: String,
-    /// Specific test function. If omitted, all tests in the file are run.
-    pub test_name: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
-pub struct FuzzConfig {
-    /// Seconds to run each fuzz target (default 60).
-    pub time_per_target: u64,
-    /// Extra environment variables (KEY=VALUE pairs).
-    pub env: Vec<String>,
-}
-
-impl Default for FuzzConfig {
-    fn default() -> Self {
-        Self {
-            time_per_target: 60,
-            env: vec![
-                "CARGO_NET_OFFLINE=true".into(),
-                "ASAN_OPTIONS=detect_odr_violation=0:detect_leaks=0".into(),
-            ],
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(default)]
-pub struct CrateOverride {
-    /// Override Miri mode for this specific crate.
-    pub miri_harness: Option<HarnessMapping>,
-}
-
-impl AuditConfig {
-    pub fn load(path: &std::path::Path) -> anyhow::Result<Self> {
-        let content = std::fs::read_to_string(path)?;
-        let config: Self = toml::from_str(&content)?;
-        Ok(config)
-    }
-
-    /// Try to find a config file: first at `dir/unsafe-audit.toml`,
-    /// then walk up parent directories.
-    pub fn discover(dir: &std::path::Path) -> Option<std::path::PathBuf> {
-        let mut current = dir.to_path_buf();
-        loop {
-            let candidate = current.join("unsafe-audit.toml");
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-            current = current.parent()?.to_path_buf();
-        }
-    }
 }

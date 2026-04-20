@@ -1,108 +1,102 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
+use geiger::IncludeTests;
 use std::path::Path;
-use std::process::Command;
+use walkdir::WalkDir;
 
-use crate::models::{CountPair, GeigerMetrics, GeigerResult};
+use crate::models::{GeigerMetrics, GeigerResult};
 
 // =========================================================================
-// Phase 1: Geiger -- run cargo-geiger as subprocess, parse JSON
+// Phase 1: Geiger -- scan .rs files via geiger lib API
 // =========================================================================
 
-/// Run `cargo geiger --output-format Json` in the crate directory.
+/// Scan all `.rs` source files in a crate directory for unsafe usage.
+///
+/// Uses the `geiger` library directly (no subprocess), walking the crate's
+/// `src/` directory and any top-level `.rs` files, aggregating counts.
 pub fn run_geiger(crate_dir: &Path) -> Result<GeigerResult> {
-    // Check that cargo-geiger is available.
-    let check = Command::new("cargo")
-        .args(["geiger", "--help"])
-        .output()
-        .context("failed to check cargo-geiger availability")?;
+    let crate_name = crate_dir
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or("unknown".into());
 
-    if !check.status.success() {
-        bail!("cargo-geiger is not installed. Install with: cargo install cargo-geiger");
+    let mut used = GeigerMetrics::default();
+    let mut forbids_unsafe = false;
+    let mut files_scanned = 0u64;
+
+    let src_dir = crate_dir.join("src");
+    let scan_dirs: Vec<&Path> = if src_dir.exists() {
+        vec![&src_dir]
+    } else {
+        // Fallback: scan the crate dir itself (for simple crates with lib.rs at root)
+        vec![crate_dir]
+    };
+
+    for dir in &scan_dirs {
+        for entry in WalkDir::new(dir) {
+            let entry = entry.context("walking source directory")?;
+            let path = entry.path();
+
+            if path.extension().map_or(true, |e| e != "rs") {
+                continue;
+            }
+
+            match geiger::find_unsafe_in_file(path, IncludeTests::No) {
+                Ok(metrics) => {
+                    files_scanned += 1;
+                    if metrics.forbids_unsafe {
+                        forbids_unsafe = true;
+                    }
+                    merge_counter_block(&mut used, &metrics.counters);
+                }
+                Err(_) => {
+                    // Skip files that fail to parse (e.g. generated, non-compilable)
+                    continue;
+                }
+            }
+        }
     }
 
-    let output = Command::new("cargo")
-        .args(["geiger", "--output-format", "Json"])
-        .current_dir(crate_dir)
-        .env("TERM", "dumb")
-        .output()
-        .context("running cargo geiger")?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    if !output.status.success() && !stdout.contains("\"packages\"") {
-        bail!(
-            "cargo geiger failed (exit {:?}):\n{}",
-            output.status.code(),
-            &stderr[..stderr.len().min(500)]
-        );
-    }
-
-    parse_geiger_json(&stdout)
-}
-
-/// Parse the JSON line from cargo-geiger output.
-/// The output is mixed: cargo status lines + one JSON line starting with `{"packages"`.
-fn parse_geiger_json(raw: &str) -> Result<GeigerResult> {
-    // Find the JSON report line.
-    let json_line = raw
-        .lines()
-        .find(|l| l.trim_start().starts_with("{\"packages\""))
-        .context("no geiger JSON found in output (cargo-geiger may have failed to compile)")
-        .map(|l| l.to_string())?;
-
-    let value: serde_json::Value = serde_json::from_str(&json_line)
-        .context("parsing geiger JSON")?;
-
-    let packages = value["packages"]
-        .as_array()
-        .context("geiger JSON missing 'packages' array")?;
-
-    if packages.is_empty() {
-        bail!("geiger reported 0 packages");
-    }
-
-    // First package is the target crate itself.
-    let pkg = &packages[0];
-    let id = &pkg["package"]["id"];
-    let crate_name = id["name"]
-        .as_str()
-        .unwrap_or("unknown")
-        .to_string();
-    let crate_version = id["version"]
-        .as_str()
-        .unwrap_or("?.?.?")
-        .to_string();
-
-    let unsafety = &pkg["unsafety"];
-    let used = parse_metrics(&unsafety["used"]);
-    let unused = parse_metrics(&unsafety["unused"]);
-    let forbids_unsafe = unsafety["forbids_unsafe"]
-        .as_bool()
-        .unwrap_or(false);
+    // Read version from Cargo.toml if possible
+    let crate_version = read_crate_version(crate_dir);
 
     Ok(GeigerResult {
         crate_name,
         crate_version,
         used,
-        unused,
+        unused: GeigerMetrics::default(), // lib API doesn't distinguish used/unused
         forbids_unsafe,
+        files_scanned,
     })
 }
 
-fn parse_metrics(v: &serde_json::Value) -> GeigerMetrics {
-    GeigerMetrics {
-        functions: parse_count_pair(&v["functions"]),
-        exprs: parse_count_pair(&v["exprs"]),
-        item_impls: parse_count_pair(&v["item_impls"]),
-        item_traits: parse_count_pair(&v["item_traits"]),
-        methods: parse_count_pair(&v["methods"]),
-    }
+fn merge_counter_block(target: &mut GeigerMetrics, cb: &cargo_geiger_serde::CounterBlock) {
+    target.functions.safe += cb.functions.safe;
+    target.functions.unsafe_ += cb.functions.unsafe_;
+    target.exprs.safe += cb.exprs.safe;
+    target.exprs.unsafe_ += cb.exprs.unsafe_;
+    target.item_impls.safe += cb.item_impls.safe;
+    target.item_impls.unsafe_ += cb.item_impls.unsafe_;
+    target.item_traits.safe += cb.item_traits.safe;
+    target.item_traits.unsafe_ += cb.item_traits.unsafe_;
+    target.methods.safe += cb.methods.safe;
+    target.methods.unsafe_ += cb.methods.unsafe_;
 }
 
-fn parse_count_pair(v: &serde_json::Value) -> CountPair {
-    CountPair {
-        safe: v["safe"].as_u64().unwrap_or(0),
-        unsafe_: v["unsafe_"].as_u64().unwrap_or(0),
+fn read_crate_version(crate_dir: &Path) -> String {
+    let toml_path = crate_dir.join("Cargo.toml");
+    let content = std::fs::read_to_string(&toml_path).unwrap_or_default();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("version") {
+            if let Some(eq) = trimmed.find('=') {
+                let v = trimmed[eq + 1..].trim().trim_matches('"').trim();
+                return v.to_string();
+            }
+        }
+        // Stop at first section
+        if trimmed.starts_with('[') {
+            break;
+        }
     }
+    "?.?.?".into()
 }
