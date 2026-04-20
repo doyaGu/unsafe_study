@@ -4,7 +4,7 @@ CSE 5349 final project. The deliverable is `cargo-unsafe-audit`, a Rust CLI that
 
 ## The Tool: `cargo-unsafe-audit`
 
-A single binary that takes a crate path and runs the full audit pipeline:
+A CLI tool that takes a crate path and runs the audit pipeline:
 
 ```
 $ unsafe-audit ../targets/httparse --fuzz-time 60 --output /tmp/report
@@ -14,7 +14,7 @@ $ unsafe-audit ../targets/httparse --fuzz-time 60 --output /tmp/report
 
 | Phase | What | How |
 |-------|------|-----|
-| **1. Geiger scan** | Count unsafe functions/exprs/impls/traits/methods | `geiger` library API, walks all `.rs` files |
+| **1. Geiger scan** | Count unsafe functions/exprs/impls/traits/methods | `geiger` library API, walks crate source files under `src/` |
 | **2. Miri test** | Detect undefined behavior | Shells out `cargo miri test`, parses UB from log output |
 | **3. Fuzz run** | Find crashes, panics, OOMs | Discovers existing `cargo fuzz` targets, runs each with libFuzzer |
 | **4. Pattern analysis** | Classify unsafe code patterns by risk | `syn` AST visitor, 13 pattern categories, risk score 0-100 |
@@ -23,7 +23,7 @@ $ unsafe-audit ../targets/httparse --fuzz-time 60 --output /tmp/report
 
 **Automatic fuzz harness generation.** Phase 3 discovers and runs existing `fuzz/` directories that are already present in the target crate. It does not auto-generate harness code from API signatures. This means:
 
-- Crates that already ship fuzz targets (httparse, serde_json, bstr, etc.) work out of the box.
+- Crates that already have a local `fuzz/` directory work out of the box.
 - Crates without a `fuzz/` directory skip Phase 3 with a `NoFuzzDir` status.
 - To fuzz a new crate, you currently write the harness by hand or use `cargo fuzz init` + manual editing.
 
@@ -100,16 +100,38 @@ PATH                          Crate dir, or parent dir with --batch
 
 Two files per run:
 
-**report.json** -- machine-readable, full structured data:
+**report.json** -- machine-readable, full structured data. Shortened example from the smoke-test output:
 ```json
 {
-  "timestamp": "2026-04-20T12:00:00Z",
+  "timestamp": "2026-04-20T01:09:36.208481574-04:00",
   "crates": [{
-    "target": { "name": "httparse", "dir": "../targets/httparse" },
-    "geiger": { "version": "1.10.1", "used": { "unsafe_exprs": 248, ... } },
-    "miri": { "passed": true, "tests_passed": 263, "ub_detected": false },
-    "fuzz": [{ "target": "parse_request", "status": "Clean", "runs": 87400000 }],
-    "pattern_analysis": { "total_unsafe_exprs": 901, "risk_score": 68.4, "patterns": [...] }
+    "target": {
+      "name": "httparse",
+      "dir": "/path/to/targets/httparse"
+    },
+    "geiger": {
+      "crate_name": "httparse",
+      "crate_version": "?.?.?",
+      "used": {
+        "exprs": { "safe": 702, "unsafe_": 335 }
+      },
+      "forbids_unsafe": false,
+      "files_scanned": 9
+    },
+    "miri": null,
+    "fuzz": [],
+    "pattern_analysis": {
+      "crate_name": "httparse",
+      "crate_version": "1.10.1",
+      "total_unsafe_exprs": 901,
+      "files_with_unsafe": 8,
+      "files_scanned": 9,
+      "risk_score": 68.4,
+      "patterns": [
+        { "pattern": "OtherUnsafe", "count": 791 },
+        { "pattern": "SimdIntrinsic", "count": 80 }
+      ]
+    }
   }]
 }
 ```
