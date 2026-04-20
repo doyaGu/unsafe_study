@@ -1,33 +1,42 @@
 # Remaining Tasks -- Unsafe Study Project
 
-Last updated: 2026-04-06
+Last updated: 2026-04-20
 
-## Current Situation
+## Current State
 
-- End-to-end study outputs are complete and archived in `report/final_report.md`.
-- Baseline crate set (`httparse`, `serde_json`, `bstr`) and extension batch
-  outputs exist for hotspot scan, Miri, and fuzzing.
-- `simd-json` has a focused triage note in `miri_reports/simd_json_triage.md`,
-  a fact-checked technical explainer at
-  `report/simd_json_stacked_borrows_explainer.md`, and an upstream-ready draft
-  in `report/simd_json_upstream_issue_draft.md`.
-- Repository has been initialized as a local Git repo on `main` with root
-  `.gitignore` and pushed to remote.
+- `cargo-unsafe-audit/` is fully implemented (4 phases: Geiger, Miri, Fuzz runner, Pattern analysis).
+- All modules build and run. Smoke test on httparse works.
+- Study data (12 crates) archived in geiger_reports/, miri_reports/, fuzz_findings/.
+- Final report at report/final_report.md.
+- DESIGN.md documents tool architecture and the planned auto-generation gap.
+- README.md updated to reflect actual tool capabilities and known gaps.
 
-## Remaining Decisions (Actual Open Items)
+## What Is Done vs. What Is Not
 
-1. Decide whether to submit the prepared `simd-json` upstream issue draft.
-2. Decide whether the local `simd-json` mitigation should remain as a study-only
-   patch or be proposed upstream.
-3. Decide whether to classify the `simd-json` behavior as a reportable upstream
-   bug or as a Miri-model incompatibility in external communication.
-4. Finalize repository publishing workflow:
-   - create initial commit
-   - optionally set remote `origin`
-   - choose whether to include large research artifacts in first push
+### Done
 
-## Suggested Next Action
+- Geiger scan via library API (Phase 1)
+- Miri test runner + UB log parser (Phase 2, single pass)
+- Fuzz runner for existing fuzz/ targets (Phase 3)
+- Syn-based unsafe pattern classifier with 13 categories + risk score (Phase 4)
+- JSON + Markdown report generation
+- CLI with batch mode, skip flags, output format selection
+- Study results for 12 crates
 
-- If this repository will be shared, do item 4 first (commit policy + remote),
-  then do items 1-3 based on how public-facing you want the `simd-json`
-  follow-up to be.
+### Not Done (Known Gaps)
+
+1. **Auto fuzz harness generation** -- the biggest gap. Tool can only run fuzz targets that already exist under the target crate's fuzz/ directory. Does not auto-discover public APIs and generate harness code. See DESIGN.md for the planned approach.
+
+2. **Miri two-pass triage** -- only runs Pass 1 (strict flags). Does not automatically re-run with reduced flags and classify the result. The study did this manually.
+
+3. **Seed corpus auto-generation** -- tool has no logic to create seed inputs from API semantics.
+
+4. **Crates.io / git auto-download** -- tool expects crates to already be cloned locally under the given path. Does not fetch from registry by name.
+
+5. **HTML report** -- only JSON and Markdown output.
+
+## Open Decisions
+
+1. Whether to implement auto harness generation (see DESIGN.md) before submission.
+2. Whether to submit the simd-json upstream issue draft.
+3. Whether to implement Miri two-pass triage automation.
