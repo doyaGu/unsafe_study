@@ -31,3 +31,4 @@ tmp/
 *.fls
 *.out
 *.synctex.gz
+unsafe-audit-report/
