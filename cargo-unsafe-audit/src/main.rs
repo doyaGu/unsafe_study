@@ -1,4 +1,4 @@
-//! cargo-unsafe-audit: Audit a Rust crate for unsafe code.
+//! unsafe-audit: Audit a Rust crate for unsafe code.
 //!
 //! Phases:
 //!   1. Geiger    — unsafe hotspot mining
@@ -26,8 +26,8 @@ use std::path::{Path, PathBuf};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "cargo-unsafe-audit",
-    bin_name = "cargo-unsafe-audit",
+    name = "unsafe-audit",
+    bin_name = "unsafe-audit",
     about = "Audit a Rust crate for unsafe code: Geiger + Miri + Fuzz + Pattern Analysis",
     version
 )]

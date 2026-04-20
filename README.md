@@ -189,7 +189,7 @@ demo_video.mp4                # Walkthrough video
 ```bash
 cd cargo-unsafe-audit
 cargo build
-cargo run --bin unsafe-audit -- ../targets/httparse \
+cargo run -- ../targets/httparse \
   --skip-miri --skip-fuzz --output /tmp/smoke
 cat /tmp/smoke/report.md
 ```
@@ -203,7 +203,7 @@ rustup component add miri rust-src --toolchain nightly-2026-02-01
 cargo install cargo-fuzz
 
 cd cargo-unsafe-audit
-cargo run --bin unsafe-audit -- ../targets/httparse \
+cargo run -- ../targets/httparse \
   --fuzz-time 60 --output /tmp/full
 ```
 
