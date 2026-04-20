@@ -1,5 +1,5 @@
 [package]
-name = "cargo-unsafe-audit"
+name = "unsafe-audit"
 version = "0.1.0"
 edition = "2021"
 description = "Audit Rust crates for unsafe code: Geiger + Miri + Fuzz + Pattern Analysis"

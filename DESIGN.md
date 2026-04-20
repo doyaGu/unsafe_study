@@ -1,4 +1,4 @@
-# cargo-unsafe-audit Design
+# unsafe-audit Design
 
 ## Architecture
 

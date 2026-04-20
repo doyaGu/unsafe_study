@@ -4,7 +4,7 @@ Last updated: 2026-04-20
 
 ## Current State
 
-- `cargo-unsafe-audit/` implements the current scoped 4-phase workflow: Geiger, Miri, Fuzz runner, and Pattern analysis.
+- `unsafe-audit/` implements the current scoped 4-phase workflow: Geiger, Miri, Fuzz runner, and Pattern analysis.
 - All modules build and run. Smoke test on httparse works.
 - Study data (12 crates) archived in geiger_reports/, miri_reports/, fuzz_findings/.
 - Final report at report/final_report.md.

@@ -1,8 +1,8 @@
 # unsafe_study -- Finding and Understanding `unsafe`-Related Failures in Real Rust Crates
 
-CSE 5349 final project. The deliverable is `cargo-unsafe-audit`, a Rust CLI that audits crates for unsafe code through four automated phases.
+CSE 5349 final project. The deliverable is `unsafe-audit`, a Rust CLI that audits crates for unsafe code through four automated phases.
 
-## The Tool: `cargo-unsafe-audit`
+## The Tool: `unsafe-audit`
 
 A CLI tool that takes a crate path and runs the audit pipeline:
 
@@ -54,7 +54,7 @@ Risk score formula: weighted severity sum / file count, square-root scaled, capp
 ### Usage
 
 ```bash
-cd cargo-unsafe-audit
+cd unsafe-audit
 cargo build --release
 
 # Smoke test (Geiger + patterns only, no external tools needed)
@@ -160,7 +160,7 @@ Key findings:
 ## Project Structure
 
 ```
-cargo-unsafe-audit/           # Main deliverable
+unsafe-audit/           # Main deliverable
   src/
     main.rs                   # CLI entry, crate discovery, phase orchestration
     analyzer.rs               # syn AST unsafe pattern classifier (Phase 4)
@@ -187,7 +187,7 @@ demo_video.mp4                # Walkthrough video
 ### Quick: Build and Smoke Test
 
 ```bash
-cd cargo-unsafe-audit
+cd unsafe-audit
 cargo build
 cargo run -- ../targets/httparse \
   --skip-miri --skip-fuzz --output /tmp/smoke
@@ -202,7 +202,7 @@ rustup toolchain install nightly-2026-02-01
 rustup component add miri rust-src --toolchain nightly-2026-02-01
 cargo install cargo-fuzz
 
-cd cargo-unsafe-audit
+cd unsafe-audit
 cargo run -- ../targets/httparse \
   --fuzz-time 60 --output /tmp/full
 ```
