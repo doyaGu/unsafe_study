@@ -73,6 +73,9 @@ Writes full logs to the output directory and stores a structured result.
 What this phase provides:
 
 - execution-based UB signals on the paths reached by tests,
+- explicit scope metadata for how the Miri result should be read,
+- coarse UB categories inferred from Miri output text,
+- a factual strict-vs-baseline triage summary,
 - not proof that the crate is UB-free.
 
 By default this is a single strict pass. With `--miri-triage`, the tool re-runs Miri with baseline flags when the strict pass reports UB:
@@ -99,9 +102,10 @@ Flow:
 What this phase provides:
 
 - evidence of visible failures under the available harnesses and budgets,
+- explicit harness-scope and budget metadata in the report,
 - not a general measure of attacker reachability or exploitability.
 
-`Clean` requires a successful process exit. A non-zero exit with unknown text is reported as `Error`, with exit code and log excerpt in the report. If `cargo fuzz list` fails, the phase returns an explicit `Error` row instead of silently treating the crate as having no targets.
+`Clean` requires a successful process exit. A non-zero exit with unknown text is reported as `Error`, with exit code and log excerpt in the report. If `cargo fuzz list` fails, the phase returns an explicit `Error` row instead of silently treating the crate as having no targets. The Markdown report also surfaces captured excerpts for other non-clean states such as build failures, panic/crash outcomes, OOM, and timeout when text is available.
 
 ### Phase 4: Pattern Analysis
 
@@ -122,6 +126,7 @@ Risky operations are classified from AST shapes such as:
 - macro nodes
 
 This avoids the earlier behavior of counting every harmless expression inside an `unsafe` context.
+The analyzer also resolves simple `use` aliases and module renames, so patterns such as `use std::mem::transmute as t;` and `use std::mem as mem;` still classify on the underlying imported operation.
 
 Current pattern categories:
 
@@ -147,6 +152,7 @@ What this phase provides:
 What it does **not** provide:
 
 - precise invariant recovery,
+- full name resolution across arbitrary scopes,
 - type-aware reasoning,
 - or proof that a given finding is actually unsound.
 
@@ -161,11 +167,12 @@ Risk score is computed from finding counts and severity weights, then scaled and
 The JSON report preserves the rawer evidence:
 
 - Geiger counts
-- Miri strict/baseline runs and verdict
-- Fuzz status, exit code, artifacts, runs, edge coverage
-- Pattern findings, finding kinds, pattern counts, risk score
+- Miri scope, coarse UB category, strict/baseline runs, triage summary, and verdict
+- Fuzz scope, requested time budget, status, exit code, artifacts, runs, and edge coverage
+- Pattern findings, finding kinds, pattern counts, `total_findings`, and risk score
 
 The Markdown report summarizes the same information for human review. It is intentionally a summary layer, not a replacement for the underlying logs.
+It now also includes a coarse cross-phase linkage section: hotspot files come from static findings, while dynamic linkage is reported only at crate/test-scope or fuzz-target granularity unless a file-name hint is explicitly labeled best-effort and log-derived.
 
 ## Planned, Not Implemented
 

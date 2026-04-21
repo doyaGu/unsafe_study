@@ -24,7 +24,7 @@ $ unsafe-audit ../targets/httparse --fuzz-time 60 --output /tmp/report
 | Phase | What it provides | Current implementation |
 |-------|-------------------|------------------------|
 | **1. Geiger scan** | A crate-local syntactic proxy for `unsafe` surface area | `geiger` library API over crate source files under `src/` |
-| **2. Miri test** | Execution-based UB signals on paths reached by tests | `cargo miri test`, with optional strict-vs-baseline triage |
+| **2. Miri test** | Execution-based UB signals on paths reached by tests | `cargo miri test`, with optional strict-vs-baseline triage, coarse UB categories, and triage summaries |
 | **3. Fuzz run** | Observable failures under existing fuzz harnesses | discovers existing `cargo fuzz` targets, records exit status, artifacts, and basic stats |
 | **4. Pattern analysis** | Heuristic classification of `unsafe`-related code shapes | `syn` AST visitor, finding kinds, pattern categories, and a risk score |
 
@@ -133,14 +133,21 @@ PATH                          Crate dir, or parent dir with --batch
 Two files per run:
 
 - `report.json`: machine-readable structured evidence
-- `report.md`: human-readable summary with per-phase sections
+- `report.md`: human-readable summary with per-phase sections and a coarse cross-phase linkage section
 
 Representative fields in `report.json` include:
 
 - Geiger counts (`functions`, `exprs`, `item_impls`, ...)
-- Miri verdict plus strict/baseline run details
-- Fuzz status, exit code, artifact path, run count, and edge coverage
-- Pattern findings, finding kinds, pattern counts, and risk score
+- Miri scope metadata, coarse UB category, strict/baseline run details, and triage summary
+- Fuzz scope, requested time budget, exit code, artifact path, run count, and edge coverage
+- Pattern findings, finding kinds, pattern counts, `total_findings`, and risk score
+
+The Markdown report also includes a coarse linkage summary that:
+
+- lists top hotspot files from static findings,
+- states Miri linkage only at recorded crate/test-scope granularity,
+- states fuzz linkage only at target granularity,
+- and labels any file-name match from Miri UB location text as best-effort and log-derived.
 
 ## Study Results
 
