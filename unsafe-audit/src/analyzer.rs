@@ -4,10 +4,11 @@
 //! unsafe code patterns into categories.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
-use syn::{Expr, ExprUnsafe, ImplItem, ItemFn, ItemImpl, Type};
+use syn::{Expr, ExprUnsafe, ImplItem, ItemFn, ItemImpl, Type, UseTree};
 
 /// A single unsafe pattern occurrence found in the codebase.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,6 +116,7 @@ pub enum Severity {
 pub struct UnsafeSummary {
     pub crate_name: String,
     pub crate_version: String,
+    pub total_findings: usize,
     pub total_unsafe_exprs: usize,
     pub total_unsafe_fns: usize,
     pub total_unsafe_impls: usize,
@@ -142,6 +144,7 @@ struct UnsafeVisitor {
     unsafe_depth: usize,
     unsafe_fn_count: usize,
     unsafe_impl_count: usize,
+    alias_scopes: Vec<HashMap<String, Vec<String>>>,
     source_lines: Vec<String>,
 }
 
@@ -207,7 +210,7 @@ impl UnsafeVisitor {
             return;
         }
 
-        let (pattern, severity) = Self::identify_pattern(expr);
+        let (pattern, severity) = self.identify_pattern(expr);
         if pattern != UnsafePattern::OtherUnsafe {
             self.push_finding(
                 FindingKind::RiskyOperation,
@@ -219,9 +222,9 @@ impl UnsafeVisitor {
         }
     }
 
-    fn identify_pattern(expr: &Expr) -> (UnsafePattern, Severity) {
+    fn identify_pattern(&self, expr: &Expr) -> (UnsafePattern, Severity) {
         match expr {
-            Expr::Call(call) => Self::identify_call_pattern(call),
+            Expr::Call(call) => self.identify_call_pattern(call),
             Expr::MethodCall(method) => match method.method.to_string().as_str() {
                 "get_unchecked" | "get_unchecked_mut" => {
                     (UnsafePattern::UncheckedIndex, Severity::Medium)
@@ -240,8 +243,9 @@ impl UnsafeVisitor {
         }
     }
 
-    fn identify_macro_pattern(mac: &syn::Macro) -> (UnsafePattern, Severity) {
-        let name = last_path_segment(&mac.path).unwrap_or_default();
+    fn identify_macro_pattern(&self, mac: &syn::Macro) -> (UnsafePattern, Severity) {
+        let resolved = self.resolve_path_segments(&mac.path);
+        let name = resolved.last().cloned().unwrap_or_default();
         match name.as_str() {
             "asm" | "llvm_asm" => (UnsafePattern::InlineAsm, Severity::High),
             "addr_of" | "addr_of_mut" => (UnsafePattern::AddrOf, Severity::Low),
@@ -250,8 +254,8 @@ impl UnsafeVisitor {
         }
     }
 
-    fn identify_call_pattern(call: &syn::ExprCall) -> (UnsafePattern, Severity) {
-        let Some((name, path)) = call_name_and_path(&call.func) else {
+    fn identify_call_pattern(&self, call: &syn::ExprCall) -> (UnsafePattern, Severity) {
+        let Some((name, path)) = self.call_name_and_path(&call.func) else {
             return (UnsafePattern::OtherUnsafe, Severity::Low);
         };
 
@@ -283,35 +287,85 @@ impl UnsafeVisitor {
             _ => (UnsafePattern::OtherUnsafe, Severity::Low),
         }
     }
-}
 
-fn call_name_and_path(func: &Expr) -> Option<(String, Vec<String>)> {
-    match func {
-        Expr::Path(path) => {
-            let segments = path
-                .path
-                .segments
-                .iter()
-                .map(|segment| segment.ident.to_string())
-                .collect::<Vec<_>>();
-            let name = segments.last()?.clone();
-            Some((name, segments))
+    fn call_name_and_path(&self, func: &Expr) -> Option<(String, Vec<String>)> {
+        match func {
+            Expr::Path(path) => {
+                let segments = self.resolve_path_segments(&path.path);
+                let name = segments.last()?.clone();
+                Some((name, segments))
+            }
+            _ => None,
         }
-        _ => None,
     }
-}
 
-fn last_path_segment(path: &syn::Path) -> Option<String> {
-    path.segments
-        .last()
-        .map(|segment| segment.ident.to_string())
+    fn resolve_path_segments(&self, path: &syn::Path) -> Vec<String> {
+        let segments = path
+            .segments
+            .iter()
+            .map(|segment| segment.ident.to_string())
+            .collect::<Vec<_>>();
+        if let Some(first) = segments.first() {
+            if let Some(resolved) = self.resolve_alias(first) {
+                let mut combined = resolved;
+                combined.extend(segments.iter().skip(1).cloned());
+                return combined;
+            }
+        }
+        segments
+    }
+
+    fn resolve_alias(&self, alias: &str) -> Option<Vec<String>> {
+        self.alias_scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(alias).cloned())
+    }
+
+    fn current_alias_scope_mut(&mut self) -> &mut HashMap<String, Vec<String>> {
+        self.alias_scopes
+            .last_mut()
+            .expect("alias scope stack is never empty")
+    }
 }
 
 fn is_simd_name(name: &str) -> bool {
     name.starts_with("_mm") || name.starts_with("_mm256") || name.starts_with("_mm512")
 }
 
+fn collect_use_aliases(prefix: &[String], tree: &UseTree, aliases: &mut HashMap<String, Vec<String>>) {
+    match tree {
+        UseTree::Path(path) => {
+            let mut next = prefix.to_vec();
+            next.push(path.ident.to_string());
+            collect_use_aliases(&next, &path.tree, aliases);
+        }
+        UseTree::Name(name) => {
+            let mut full = prefix.to_vec();
+            full.push(name.ident.to_string());
+            aliases.insert(name.ident.to_string(), full);
+        }
+        UseTree::Rename(rename) => {
+            let mut full = prefix.to_vec();
+            full.push(rename.ident.to_string());
+            aliases.insert(rename.rename.to_string(), full);
+        }
+        UseTree::Group(group) => {
+            for item in &group.items {
+                collect_use_aliases(prefix, item, aliases);
+            }
+        }
+        UseTree::Glob(_) => {}
+    }
+}
+
 impl<'ast> Visit<'ast> for UnsafeVisitor {
+    fn visit_block(&mut self, block: &'ast syn::Block) {
+        self.alias_scopes.push(HashMap::new());
+        visit::visit_block(self, block);
+        self.alias_scopes.pop();
+    }
+
     fn visit_item_fn(&mut self, i: &'ast ItemFn) {
         let prev_fn = self.current_fn.clone();
         self.current_fn = i.sig.ident.to_string();
@@ -395,7 +449,7 @@ impl<'ast> Visit<'ast> for UnsafeVisitor {
 
     fn visit_macro(&mut self, i: &'ast syn::Macro) {
         if self.unsafe_depth > 0 {
-            let (pattern, severity) = Self::identify_macro_pattern(i);
+            let (pattern, severity) = self.identify_macro_pattern(i);
             if pattern != UnsafePattern::OtherUnsafe {
                 self.push_finding(
                     FindingKind::RiskyOperation,
@@ -407,6 +461,13 @@ impl<'ast> Visit<'ast> for UnsafeVisitor {
             }
         }
         visit::visit_macro(self, i);
+    }
+
+    fn visit_item_use(&mut self, i: &'ast syn::ItemUse) {
+        let mut aliases = HashMap::new();
+        collect_use_aliases(&[], &i.tree, &mut aliases);
+        self.current_alias_scope_mut().extend(aliases);
+        visit::visit_item_use(self, i);
     }
 
     fn visit_item_foreign_mod(&mut self, i: &'ast syn::ItemForeignMod) {
@@ -499,6 +560,7 @@ pub fn analyze_crate(crate_dir: &Path) -> anyhow::Result<UnsafeSummary> {
     Ok(UnsafeSummary {
         crate_name,
         crate_version,
+        total_findings: all_findings.len(),
         total_unsafe_exprs: all_findings.len(),
         total_unsafe_fns,
         total_unsafe_impls,
@@ -524,6 +586,7 @@ fn analyze_source(path: &Path, content: &str) -> anyhow::Result<FileAnalysis> {
         unsafe_depth: 0,
         unsafe_fn_count: 0,
         unsafe_impl_count: 0,
+        alias_scopes: vec![HashMap::new()],
         source_lines: content.lines().map(|l| l.to_string()).collect(),
     };
     visitor.visit_file(&parsed);
@@ -744,6 +807,89 @@ fn main() {
                 "missing pattern {pattern:?}"
             );
         }
+    }
+
+    #[test]
+    fn classifies_renamed_import_calls() {
+        let analysis = analyze(
+            r#"
+use std::mem::transmute as t;
+use std::str::from_utf8_unchecked as unchecked;
+use std::ptr::read as ptr_read;
+
+fn main() {
+    let value = 1u32;
+    let ptr = &value as *const u32;
+    unsafe {
+        let _: i32 = t(value);
+        let _ = unchecked(b"x");
+        let _ = ptr_read(ptr);
+    }
+}
+"#,
+        );
+
+        assert!(analysis.findings.iter().any(|f| f.pattern == UnsafePattern::Transmute));
+        assert!(analysis
+            .findings
+            .iter()
+            .any(|f| f.pattern == UnsafePattern::UncheckedConversion));
+        assert!(analysis
+            .findings
+            .iter()
+            .any(|f| f.pattern == UnsafePattern::PtrReadWrite));
+    }
+
+    #[test]
+    fn classifies_module_alias_calls() {
+        let analysis = analyze(
+            r#"
+use std::mem as mem;
+use std::ptr as raw_ptr;
+
+fn main() {
+    let value = 1u32;
+    let ptr = &value as *const u32;
+    unsafe {
+        let _: i32 = mem::transmute(value);
+        let _ = raw_ptr::read(ptr);
+    }
+}
+"#,
+        );
+
+        assert!(analysis.findings.iter().any(|f| f.pattern == UnsafePattern::Transmute));
+        assert!(analysis
+            .findings
+            .iter()
+            .any(|f| f.pattern == UnsafePattern::PtrReadWrite));
+    }
+
+    #[test]
+    fn classifies_macro_aliases() {
+        let analysis = analyze(
+            r#"
+use core::arch::asm as arch_asm;
+use std::ptr::addr_of as addr;
+
+fn main() {
+    let value = 1u32;
+    unsafe {
+        arch_asm!("nop");
+        let _ = addr!(value);
+    }
+}
+"#,
+        );
+
+        assert!(analysis
+            .findings
+            .iter()
+            .any(|f| f.pattern == UnsafePattern::InlineAsm));
+        assert!(analysis
+            .findings
+            .iter()
+            .any(|f| f.pattern == UnsafePattern::AddrOf));
     }
 
     #[test]

@@ -358,7 +358,7 @@ fn audit_crate(
                 println!(
                     "  {} {} findings, {} files, risk={:.1} ({})",
                     "·".green(),
-                    summary.total_unsafe_exprs.to_string().yellow(),
+                    summary.total_findings.to_string().yellow(),
                     summary.files_with_unsafe.to_string().dimmed(),
                     score,
                     rating,

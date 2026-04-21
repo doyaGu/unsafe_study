@@ -3,7 +3,7 @@ use std::path::Path;
 use std::process::Command;
 use std::time::{Instant, SystemTime};
 
-use crate::models::{FuzzStatus, FuzzTargetResult};
+use crate::models::{FuzzScope, FuzzStatus, FuzzTargetResult};
 
 // =========================================================================
 // Phase 3: Fuzz — discover and run existing fuzz targets
@@ -17,7 +17,13 @@ pub fn run_fuzz(
 ) -> Result<Vec<FuzzTargetResult>> {
     let fuzz_dir = crate_dir.join("fuzz");
     if !fuzz_dir.exists() || !fuzz_dir.join("Cargo.toml").exists() {
-        return Ok(vec![empty_result("(none)", FuzzStatus::NoFuzzDir, None)]);
+        return Ok(vec![empty_result(
+            "(none)",
+            FuzzScope::NoneAvailable,
+            FuzzStatus::NoFuzzDir,
+            fuzz_time,
+            None,
+        )]);
     }
 
     let targets = match list_targets(crate_dir) {
@@ -25,7 +31,13 @@ pub fn run_fuzz(
         Err(result) => return Ok(vec![result]),
     };
     if targets.is_empty() {
-        return Ok(vec![empty_result("(none)", FuzzStatus::NoTargets, None)]);
+        return Ok(vec![empty_result(
+            "(none)",
+            FuzzScope::NoneAvailable,
+            FuzzStatus::NoTargets,
+            fuzz_time,
+            None,
+        )]);
     }
 
     let mut results = Vec::new();
@@ -40,7 +52,15 @@ fn list_targets(crate_dir: &Path) -> std::result::Result<Vec<String>, FuzzTarget
         .args(["fuzz", "list"])
         .current_dir(crate_dir)
         .output()
-        .map_err(|e| empty_result("(list)", FuzzStatus::Error, Some(e.to_string())))?;
+        .map_err(|e| {
+            empty_result(
+                "(list)",
+                FuzzScope::DiscoveryOnly,
+                FuzzStatus::Error,
+                0,
+                Some(e.to_string()),
+            )
+        })?;
 
     if !output.status.success() {
         let combined = format!(
@@ -48,7 +68,13 @@ fn list_targets(crate_dir: &Path) -> std::result::Result<Vec<String>, FuzzTarget
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
-        let mut result = empty_result("(list)", FuzzStatus::Error, excerpt(&combined));
+        let mut result = empty_result(
+            "(list)",
+            FuzzScope::DiscoveryOnly,
+            FuzzStatus::Error,
+            0,
+            excerpt(&combined),
+        );
         result.exit_code = output.status.code();
         return Err(result);
     }
@@ -105,9 +131,11 @@ fn run_single(
 
             FuzzTargetResult {
                 target_name: target.to_string(),
+                scope: FuzzScope::ExistingHarness,
                 status,
                 success: out.status.success(),
                 exit_code: out.status.code(),
+                requested_time_budget_secs: fuzz_time,
                 total_runs,
                 edges_covered,
                 duration_secs: duration,
@@ -118,9 +146,11 @@ fn run_single(
         }
         Err(e) => FuzzTargetResult {
             target_name: target.to_string(),
+            scope: FuzzScope::ExistingHarness,
             status: FuzzStatus::Error,
             success: false,
             exit_code: None,
+            requested_time_budget_secs: fuzz_time,
             total_runs: None,
             edges_covered: None,
             duration_secs: duration,
@@ -226,14 +256,18 @@ fn excerpt(combined: &str) -> Option<String> {
 
 fn empty_result(
     target_name: &str,
+    scope: FuzzScope,
     status: FuzzStatus,
+    requested_time_budget_secs: u64,
     log_excerpt: Option<String>,
 ) -> FuzzTargetResult {
     FuzzTargetResult {
         target_name: target_name.into(),
+        scope,
         status,
         success: false,
         exit_code: None,
+        requested_time_budget_secs,
         total_runs: None,
         edges_covered: None,
         duration_secs: 0,

@@ -3,7 +3,7 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 
-use crate::models::{MiriResult, MiriRun, MiriVerdict};
+use crate::models::{MiriResult, MiriRun, MiriScope, MiriUbCategory, MiriVerdict};
 
 // =========================================================================
 // Phase 2: Miri — run `cargo miri test` and parse output for UB
@@ -49,7 +49,7 @@ fn run_miri_once(crate_dir: &Path, miri_flags: &str, log_path: &Path) -> Result<
 
     let passed = output.status.success();
     let (tests_run, tests_passed, tests_failed) = parse_test_summary(&combined);
-    let (ub_detected, ub_message, ub_location) = extract_ub(&combined);
+    let (ub_detected, ub_category, ub_message, ub_location) = extract_ub(&combined);
 
     Ok(MiriRun {
         flags: miri_flags.to_string(),
@@ -58,6 +58,7 @@ fn run_miri_once(crate_dir: &Path, miri_flags: &str, log_path: &Path) -> Result<
         tests_passed,
         tests_failed,
         ub_detected,
+        ub_category,
         ub_message,
         ub_location,
         log_path: log_path.to_path_buf(),
@@ -67,6 +68,7 @@ fn run_miri_once(crate_dir: &Path, miri_flags: &str, log_path: &Path) -> Result<
 
 fn result_from_runs(strict: MiriRun, baseline: Option<MiriRun>) -> MiriResult {
     let verdict = classify_verdict(&strict, baseline.as_ref());
+    let triage_summary = summarize_triage(&strict, baseline.as_ref(), verdict);
     let duration_secs = strict.duration_secs
         + baseline
             .as_ref()
@@ -74,12 +76,15 @@ fn result_from_runs(strict: MiriRun, baseline: Option<MiriRun>) -> MiriResult {
             .unwrap_or(0.0);
 
     MiriResult {
+        scope: MiriScope::FullSuite,
         verdict,
+        triage_summary,
         passed: strict.passed,
         tests_run: strict.tests_run,
         tests_passed: strict.tests_passed,
         tests_failed: strict.tests_failed,
         ub_detected: strict.ub_detected,
+        ub_category: strict.ub_category,
         ub_message: strict.ub_message.clone(),
         ub_location: strict.ub_location.clone(),
         log_path: strict.log_path.clone(),
@@ -103,6 +108,38 @@ fn classify_verdict(strict: &MiriRun, baseline: Option<&MiriRun>) -> MiriVerdict
         Some(baseline) if baseline.passed => MiriVerdict::StrictOnlySuspectedFalsePositive,
         Some(_) => MiriVerdict::Inconclusive,
         None => MiriVerdict::Inconclusive,
+    }
+}
+
+fn summarize_triage(
+    strict: &MiriRun,
+    baseline: Option<&MiriRun>,
+    verdict: MiriVerdict,
+) -> Option<String> {
+    match (strict.ub_detected, baseline, verdict) {
+        (false, _, MiriVerdict::Clean) => Some(
+            "Strict Miri completed without a UB signal on the exercised test paths.".into(),
+        ),
+        (false, _, MiriVerdict::FailedNoUb) => {
+            Some("Strict Miri failed without an extracted UB signal.".into())
+        }
+        (true, Some(baseline), MiriVerdict::TruePositiveUb) => Some(format!(
+            "Strict and baseline Miri both reported UB; strict={} baseline={}.",
+            category_or_dash(strict.ub_category),
+            category_or_dash(baseline.ub_category)
+        )),
+        (true, Some(_), MiriVerdict::StrictOnlySuspectedFalsePositive) => Some(
+            "Strict Miri reported UB, but the baseline rerun completed without a UB signal."
+                .into(),
+        ),
+        (true, Some(_), MiriVerdict::Inconclusive) => Some(
+            "Strict Miri reported UB, but the baseline rerun did not cleanly confirm or dismiss it."
+                .into(),
+        ),
+        (true, None, MiriVerdict::Inconclusive) => Some(
+            "Strict Miri reported UB and no baseline rerun was recorded for comparison.".into(),
+        ),
+        _ => None,
     }
 }
 
@@ -145,8 +182,9 @@ fn extract_number(line: &str, keyword: &str) -> Option<usize> {
     num_str.parse().ok()
 }
 
-fn extract_ub(output: &str) -> (bool, Option<String>, Option<String>) {
+fn extract_ub(output: &str) -> (bool, Option<MiriUbCategory>, Option<String>, Option<String>) {
     let mut ub_detected = false;
+    let mut ub_category = None;
     let mut ub_message = None;
     let mut ub_location = None;
 
@@ -160,6 +198,7 @@ fn extract_ub(output: &str) -> (bool, Option<String>, Option<String>) {
                 || lower.contains("data race"))
         {
             ub_detected = true;
+            ub_category = classify_ub_category(&lower);
             ub_message = Some(line.trim().to_string());
         }
         if line.contains("-->") && ub_message.is_some() && ub_location.is_none() {
@@ -172,7 +211,29 @@ fn extract_ub(output: &str) -> (bool, Option<String>, Option<String>) {
         }
     }
 
-    (ub_detected, ub_message, ub_location)
+    (ub_detected, ub_category, ub_message, ub_location)
+}
+
+fn classify_ub_category(line: &str) -> Option<MiriUbCategory> {
+    if line.contains("alignment") {
+        Some(MiriUbCategory::Alignment)
+    } else if line.contains("stacked borrow") || line.contains("provenance") || line.contains("retag") {
+        Some(MiriUbCategory::Provenance)
+    } else if line.contains("out-of-bounds") || line.contains("out of bounds") {
+        Some(MiriUbCategory::OutOfBounds)
+    } else if line.contains("uninitialized") {
+        Some(MiriUbCategory::Uninitialized)
+    } else if line.contains("undefined behavior") || line.contains("data race") {
+        Some(MiriUbCategory::Other)
+    } else {
+        None
+    }
+}
+
+fn category_or_dash(category: Option<MiriUbCategory>) -> String {
+    category
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "-".into())
 }
 
 #[cfg(test)]
@@ -188,6 +249,11 @@ mod tests {
             tests_passed: None,
             tests_failed: None,
             ub_detected,
+            ub_category: if ub_detected {
+                Some(MiriUbCategory::Other)
+            } else {
+                None
+            },
             ub_message: None,
             ub_location: None,
             log_path: PathBuf::from("miri.log"),
@@ -206,14 +272,31 @@ mod tests {
     fn extracts_ub_and_location() {
         let output = "error: Undefined Behavior: out-of-bounds pointer use\n --> src/lib.rs:10:5";
 
-        let (ub, message, location) = extract_ub(output);
+        let (ub, category, message, location) = extract_ub(output);
 
         assert!(ub);
+        assert_eq!(category, Some(MiriUbCategory::OutOfBounds));
         assert_eq!(
             message.as_deref(),
             Some("error: Undefined Behavior: out-of-bounds pointer use")
         );
         assert_eq!(location.as_deref(), Some("src/lib.rs:10:5"));
+    }
+
+    #[test]
+    fn classifies_alignment_and_provenance_categories() {
+        let alignment = "error: Undefined Behavior: accessing memory based on pointer with alignment 1";
+        let provenance = "error: Undefined Behavior: trying to retag from <908696> for SharedReadOnly permission";
+
+        let (_, alignment_category, _, _) = extract_ub(alignment);
+        let (_, provenance_category, _, _) = extract_ub(provenance);
+
+        assert_eq!(alignment_category, Some(MiriUbCategory::Alignment));
+        assert_eq!(
+            classify_ub_category("stacked borrow violation"),
+            Some(MiriUbCategory::Provenance)
+        );
+        assert_eq!(provenance_category, Some(MiriUbCategory::Provenance));
     }
 
     #[test]

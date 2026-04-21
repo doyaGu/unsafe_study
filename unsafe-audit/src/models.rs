@@ -44,12 +44,15 @@ pub struct CountPair {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MiriResult {
+    pub scope: MiriScope,
     pub verdict: MiriVerdict,
+    pub triage_summary: Option<String>,
     pub passed: bool,
     pub tests_run: Option<usize>,
     pub tests_passed: Option<usize>,
     pub tests_failed: Option<usize>,
     pub ub_detected: bool,
+    pub ub_category: Option<MiriUbCategory>,
     pub ub_message: Option<String>,
     pub ub_location: Option<String>,
     pub log_path: PathBuf,
@@ -59,12 +62,56 @@ pub struct MiriResult {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MiriScope {
+    FullSuite,
+    Targeted,
+    Smoke,
+}
+
+impl Default for MiriScope {
+    fn default() -> Self {
+        Self::FullSuite
+    }
+}
+
+impl std::fmt::Display for MiriScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MiriScope::FullSuite => write!(f, "full_suite"),
+            MiriScope::Targeted => write!(f, "targeted"),
+            MiriScope::Smoke => write!(f, "smoke"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MiriVerdict {
     Clean,
     TruePositiveUb,
     StrictOnlySuspectedFalsePositive,
     FailedNoUb,
     Inconclusive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MiriUbCategory {
+    Alignment,
+    Provenance,
+    OutOfBounds,
+    Uninitialized,
+    Other,
+}
+
+impl std::fmt::Display for MiriUbCategory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MiriUbCategory::Alignment => write!(f, "alignment"),
+            MiriUbCategory::Provenance => write!(f, "provenance"),
+            MiriUbCategory::OutOfBounds => write!(f, "out_of_bounds"),
+            MiriUbCategory::Uninitialized => write!(f, "uninitialized"),
+            MiriUbCategory::Other => write!(f, "other"),
+        }
+    }
 }
 
 impl std::fmt::Display for MiriVerdict {
@@ -89,6 +136,7 @@ pub struct MiriRun {
     pub tests_passed: Option<usize>,
     pub tests_failed: Option<usize>,
     pub ub_detected: bool,
+    pub ub_category: Option<MiriUbCategory>,
     pub ub_message: Option<String>,
     pub ub_location: Option<String>,
     pub log_path: PathBuf,
@@ -127,15 +175,40 @@ impl std::fmt::Display for FuzzStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FuzzTargetResult {
     pub target_name: String,
+    pub scope: FuzzScope,
     pub status: FuzzStatus,
     pub success: bool,
     pub exit_code: Option<i32>,
+    pub requested_time_budget_secs: u64,
     pub total_runs: Option<u64>,
     pub edges_covered: Option<u64>,
     pub duration_secs: u64,
     pub artifact_path: Option<PathBuf>,
     pub reproducer_size_bytes: Option<u64>,
     pub log_excerpt: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FuzzScope {
+    ExistingHarness,
+    DiscoveryOnly,
+    NoneAvailable,
+}
+
+impl Default for FuzzScope {
+    fn default() -> Self {
+        Self::ExistingHarness
+    }
+}
+
+impl std::fmt::Display for FuzzScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FuzzScope::ExistingHarness => write!(f, "existing_harness"),
+            FuzzScope::DiscoveryOnly => write!(f, "discovery_only"),
+            FuzzScope::NoneAvailable => write!(f, "none_available"),
+        }
+    }
 }
 
 // ---- Per-crate result ----
