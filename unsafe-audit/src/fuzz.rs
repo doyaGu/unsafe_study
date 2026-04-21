@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::path::Path;
 use std::process::Command;
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 use crate::models::{FuzzStatus, FuzzTargetResult};
 
@@ -17,30 +17,15 @@ pub fn run_fuzz(
 ) -> Result<Vec<FuzzTargetResult>> {
     let fuzz_dir = crate_dir.join("fuzz");
     if !fuzz_dir.exists() || !fuzz_dir.join("Cargo.toml").exists() {
-        return Ok(vec![FuzzTargetResult {
-            target_name: "(none)".into(),
-            status: FuzzStatus::NoFuzzDir,
-            total_runs: None,
-            edges_covered: None,
-            duration_secs: 0,
-            artifact_path: None,
-            reproducer_size_bytes: None,
-            log_excerpt: None,
-        }]);
+        return Ok(vec![empty_result("(none)", FuzzStatus::NoFuzzDir, None)]);
     }
 
-    let targets = list_targets(crate_dir)?;
+    let targets = match list_targets(crate_dir) {
+        Ok(targets) => targets,
+        Err(result) => return Ok(vec![result]),
+    };
     if targets.is_empty() {
-        return Ok(vec![FuzzTargetResult {
-            target_name: "(none)".into(),
-            status: FuzzStatus::NoTargets,
-            total_runs: None,
-            edges_covered: None,
-            duration_secs: 0,
-            artifact_path: None,
-            reproducer_size_bytes: None,
-            log_excerpt: None,
-        }]);
+        return Ok(vec![empty_result("(none)", FuzzStatus::NoTargets, None)]);
     }
 
     let mut results = Vec::new();
@@ -50,23 +35,29 @@ pub fn run_fuzz(
     Ok(results)
 }
 
-fn list_targets(crate_dir: &Path) -> Result<Vec<String>> {
+fn list_targets(crate_dir: &Path) -> std::result::Result<Vec<String>, FuzzTargetResult> {
     let output = Command::new("cargo")
         .args(["fuzz", "list"])
         .current_dir(crate_dir)
-        .output()?;
+        .output()
+        .map_err(|e| empty_result("(list)", FuzzStatus::Error, Some(e.to_string())))?;
 
     if !output.status.success() {
-        return Ok(Vec::new());
+        let combined = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let mut result = empty_result("(list)", FuzzStatus::Error, excerpt(&combined));
+        result.exit_code = output.status.code();
+        return Err(result);
     }
 
-    Ok(
-        String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty())
-            .collect(),
-    )
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect())
 }
 
 fn run_single(
@@ -80,8 +71,14 @@ fn run_single(
     let start = Instant::now();
 
     let mut cmd = Command::new("cargo");
-    cmd.args(["fuzz", "run", target, "--", &format!("-max_total_time={}", fuzz_time)])
-        .current_dir(crate_dir);
+    cmd.args([
+        "fuzz",
+        "run",
+        target,
+        "--",
+        &format!("-max_total_time={}", fuzz_time),
+    ])
+    .current_dir(crate_dir);
 
     for (key, value) in env_pairs {
         cmd.env(key, value);
@@ -98,7 +95,8 @@ fn run_single(
 
             let _ = std::fs::write(&log_path, &combined);
 
-            let (status, artifact_path) = classify(&combined, crate_dir, target);
+            let (status, artifact_path) =
+                classify(out.status.success(), &combined, crate_dir, target);
             let (total_runs, edges_covered) = parse_stats(&combined);
             let reproducer_size = artifact_path
                 .as_ref()
@@ -108,6 +106,8 @@ fn run_single(
             FuzzTargetResult {
                 target_name: target.to_string(),
                 status,
+                success: out.status.success(),
+                exit_code: out.status.code(),
                 total_runs,
                 edges_covered,
                 duration_secs: duration,
@@ -119,6 +119,8 @@ fn run_single(
         Err(e) => FuzzTargetResult {
             target_name: target.to_string(),
             status: FuzzStatus::Error,
+            success: false,
+            exit_code: None,
             total_runs: None,
             edges_covered: None,
             duration_secs: duration,
@@ -129,7 +131,12 @@ fn run_single(
     }
 }
 
-fn classify(combined: &str, crate_dir: &Path, target: &str) -> (FuzzStatus, Option<std::path::PathBuf>) {
+fn classify(
+    success: bool,
+    combined: &str,
+    crate_dir: &Path,
+    target: &str,
+) -> (FuzzStatus, Option<std::path::PathBuf>) {
     let lower = combined.to_lowercase();
 
     if lower.contains("could not compile") || lower.contains("error: could not find") {
@@ -144,6 +151,9 @@ fn classify(combined: &str, crate_dir: &Path, target: &str) -> (FuzzStatus, Opti
     if lower.contains("timeout") {
         return (FuzzStatus::Timeout, find_artifact(crate_dir, target));
     }
+    if !success {
+        return (FuzzStatus::Error, find_artifact(crate_dir, target));
+    }
     (FuzzStatus::Clean, None)
 }
 
@@ -152,7 +162,12 @@ fn find_artifact(crate_dir: &Path, target: &str) -> Option<std::path::PathBuf> {
     std::fs::read_dir(&dir)
         .ok()?
         .filter_map(|e| e.ok())
-        .find(|e| e.path().is_file())
+        .filter(|e| e.path().is_file())
+        .max_by_key(|e| {
+            e.metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(SystemTime::UNIX_EPOCH)
+        })
         .map(|e| e.path())
 }
 
@@ -206,5 +221,68 @@ fn excerpt(combined: &str) -> Option<String> {
         Some(combined.to_string())
     } else {
         None
+    }
+}
+
+fn empty_result(
+    target_name: &str,
+    status: FuzzStatus,
+    log_excerpt: Option<String>,
+) -> FuzzTargetResult {
+    FuzzTargetResult {
+        target_name: target_name.into(),
+        status,
+        success: false,
+        exit_code: None,
+        total_runs: None,
+        edges_covered: None,
+        duration_secs: 0,
+        artifact_path: None,
+        reproducer_size_bytes: None,
+        log_excerpt,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn nonzero_unrecognized_fuzz_output_is_error_not_clean() {
+        let (status, artifact) = classify(
+            false,
+            "libfuzzer exited with status 77",
+            Path::new("."),
+            "target",
+        );
+
+        assert_eq!(status, FuzzStatus::Error);
+        assert!(artifact.is_none());
+    }
+
+    #[test]
+    fn successful_unremarkable_fuzz_output_is_clean() {
+        let (status, artifact) = classify(true, "DONE 100 runs", Path::new("."), "target");
+
+        assert_eq!(status, FuzzStatus::Clean);
+        assert!(artifact.is_none());
+    }
+
+    #[test]
+    fn find_artifact_uses_most_recent_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let artifact_dir = dir.path().join("fuzz/artifacts/target");
+        std::fs::create_dir_all(&artifact_dir).unwrap();
+        let old = artifact_dir.join("old");
+        let new = artifact_dir.join("new");
+        std::fs::write(&old, b"old").unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(&new, b"new").unwrap();
+
+        assert_eq!(
+            find_artifact(dir.path(), "target").as_deref(),
+            Some(new.as_path())
+        );
     }
 }

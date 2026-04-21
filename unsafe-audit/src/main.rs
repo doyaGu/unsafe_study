@@ -1,10 +1,10 @@
-//! unsafe-audit: Audit a Rust crate for unsafe code.
+//! unsafe-audit: Collect several kinds of evidence about `unsafe` code in a Rust crate.
 //!
 //! Phases:
-//!   1. Geiger    — unsafe hotspot mining
-//!   2. Miri      — UB detection
-//!   3. Fuzz      — crash/panic discovery
-//!   4. Patterns  — syn AST classification (unique value-add)
+//!   1. Geiger    — syntactic proxy for unsafe surface area
+//!   2. Miri      — UB signals on exercised test paths
+//!   3. Fuzz      — visible failures under existing harnesses
+//!   4. Patterns  — AST-shaped finding extraction and heuristic classification
 //!   5. Report    — Markdown + JSON
 //!
 //! Usage:
@@ -24,11 +24,13 @@ use clap::Parser;
 use colored::*;
 use std::path::{Path, PathBuf};
 
+const BASELINE_MIRI_FLAGS: &str = "-Zmiri-strict-provenance";
+
 #[derive(Parser, Debug)]
 #[command(
     name = "unsafe-audit",
     bin_name = "unsafe-audit",
-    about = "Audit a Rust crate for unsafe code: Geiger + Miri + Fuzz + Pattern Analysis",
+    about = "Collect multi-phase evidence about unsafe code: Geiger + Miri + Fuzz + Pattern Analysis",
     version
 )]
 struct Cli {
@@ -57,8 +59,15 @@ struct Cli {
     skip_patterns: bool,
 
     /// Extra flags for MIRIFLAGS.
-    #[arg(long, default_value = "-Zmiri-symbolic-alignment-check -Zmiri-strict-provenance")]
+    #[arg(
+        long,
+        default_value = "-Zmiri-symbolic-alignment-check -Zmiri-strict-provenance"
+    )]
     miri_flags: String,
+
+    /// Re-run Miri with baseline flags when strict Miri reports UB.
+    #[arg(long)]
+    miri_triage: bool,
 
     /// Fuzz duration per target in seconds.
     #[arg(long, default_value = "60")]
@@ -99,7 +108,10 @@ fn main() -> Result<()> {
     let fuzz_env: Vec<(String, String)> = cli
         .fuzz_env
         .iter()
-        .filter_map(|s| s.split_once('=').map(|(k, v)| (k.to_string(), v.to_string())))
+        .filter_map(|s| {
+            s.split_once('=')
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+        })
         .collect();
 
     // Discover crates
@@ -124,7 +136,10 @@ fn main() -> Result<()> {
     }
 
     // Output directory
-    let output_dir = cli.output.clone().unwrap_or_else(|| path.join("unsafe-audit-report"));
+    let output_dir = cli
+        .output
+        .clone()
+        .unwrap_or_else(|| path.join("unsafe-audit-report"));
     let miri_log_dir = output_dir.join("miri_logs");
     let fuzz_log_dir = output_dir.join("fuzz_logs");
     std::fs::create_dir_all(&output_dir)?;
@@ -135,7 +150,13 @@ fn main() -> Result<()> {
 
     for target in &crates {
         println!("{}", format!("━━ {} ━━", target.name).bold().cyan());
-        results.push(audit_crate(target, &cli, &fuzz_env, &miri_log_dir, &fuzz_log_dir));
+        results.push(audit_crate(
+            target,
+            &cli,
+            &fuzz_env,
+            &miri_log_dir,
+            &fuzz_log_dir,
+        ));
         println!();
     }
 
@@ -172,15 +193,24 @@ fn main() -> Result<()> {
 
 fn discover_crates(path: &Path, batch: bool) -> Result<Vec<models::CrateTarget>> {
     if path.join("Cargo.toml").exists() && !batch {
-        let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or("unknown".into());
-        return Ok(vec![models::CrateTarget { name, dir: path.to_path_buf() }]);
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or("unknown".into());
+        return Ok(vec![models::CrateTarget {
+            name,
+            dir: path.to_path_buf(),
+        }]);
     }
 
     let mut crates = Vec::new();
     for entry in std::fs::read_dir(path)? {
         let sub = entry?.path();
         if sub.join("Cargo.toml").exists() {
-            let name = sub.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or("unknown".into());
+            let name = sub
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or("unknown".into());
             crates.push(models::CrateTarget { name, dir: sub });
         }
     }
@@ -228,10 +258,34 @@ fn audit_crate(
     // Phase 2
     if !cli.skip_miri {
         phase("Phase 2: Miri");
-        let log_path = miri_log_dir.join(format!("{}.log", target.name));
-        match miri::run_miri(&target.dir, &cli.miri_flags, &log_path) {
+        let strict_log_path = if cli.miri_triage {
+            miri_log_dir.join(format!("{}.strict.log", target.name))
+        } else {
+            miri_log_dir.join(format!("{}.log", target.name))
+        };
+        let baseline_log_path = miri_log_dir.join(format!("{}.baseline.log", target.name));
+        let miri_result = if cli.miri_triage {
+            miri::run_miri_with_triage(
+                &target.dir,
+                &cli.miri_flags,
+                BASELINE_MIRI_FLAGS,
+                &strict_log_path,
+                &baseline_log_path,
+            )
+        } else {
+            miri::run_miri(&target.dir, &cli.miri_flags, &strict_log_path)
+        };
+        match miri_result {
             Ok(m) => {
-                let status = if m.passed { "CLEAN".green() } else if m.ub_detected { "UB DETECTED".red().bold() } else { "FAILED".red() };
+                let status = match m.verdict {
+                    models::MiriVerdict::Clean => "CLEAN".green(),
+                    models::MiriVerdict::TruePositiveUb => "TRUE UB".red().bold(),
+                    models::MiriVerdict::StrictOnlySuspectedFalsePositive => {
+                        "STRICT-ONLY FP?".yellow().bold()
+                    }
+                    models::MiriVerdict::FailedNoUb => "FAILED".red(),
+                    models::MiriVerdict::Inconclusive => "INCONCLUSIVE".yellow(),
+                };
                 println!("  {} {} ({:.1}s)", "·".green(), status, m.duration_secs);
                 if m.ub_detected {
                     if let Some(msg) = &m.ub_message {
@@ -256,7 +310,9 @@ fn audit_crate(
                         models::FuzzStatus::Oom => "OOM".red().bold(),
                         models::FuzzStatus::Timeout => "TIMEOUT".yellow(),
                         models::FuzzStatus::BuildFailed => "BUILD FAIL".red(),
-                        models::FuzzStatus::NoFuzzDir | models::FuzzStatus::NoTargets => format!("{}", f.status).dimmed(),
+                        models::FuzzStatus::NoFuzzDir | models::FuzzStatus::NoTargets => {
+                            format!("{}", f.status).dimmed()
+                        }
                         models::FuzzStatus::Error => "ERROR".red(),
                     };
                     println!(
@@ -264,10 +320,18 @@ fn audit_crate(
                         "·".green(),
                         f.target_name.bold(),
                         s,
-                        f.total_runs.map(|n| format!("({} runs)", n)).unwrap_or_default().dimmed(),
+                        f.total_runs
+                            .map(|n| format!("({} runs)", n))
+                            .unwrap_or_default()
+                            .dimmed(),
                     );
                     if let Some(p) = &f.artifact_path {
-                        println!("    {} {} ({}B)", "↳".yellow(), p.display(), f.reproducer_size_bytes.unwrap_or(0));
+                        println!(
+                            "    {} {} ({}B)",
+                            "↳".yellow(),
+                            p.display(),
+                            f.reproducer_size_bytes.unwrap_or(0)
+                        );
                     }
                 }
                 result.fuzz = fuzz_results;
@@ -281,9 +345,18 @@ fn audit_crate(
         phase("Phase 4: Patterns");
         match analyzer::analyze_crate(&target.dir) {
             Ok(summary) => {
-                let (score, rating) = (summary.risk_score, if summary.risk_score < 20.0 { "LOW".green() } else if summary.risk_score < 50.0 { "MEDIUM".yellow() } else { "HIGH".red() });
+                let (score, rating) = (
+                    summary.risk_score,
+                    if summary.risk_score < 20.0 {
+                        "LOW".green()
+                    } else if summary.risk_score < 50.0 {
+                        "MEDIUM".yellow()
+                    } else {
+                        "HIGH".red()
+                    },
+                );
                 println!(
-                    "  {} {} unsafe exprs, {} files, risk={:.1} ({})",
+                    "  {} {} findings, {} files, risk={:.1} ({})",
                     "·".green(),
                     summary.total_unsafe_exprs.to_string().yellow(),
                     summary.files_with_unsafe.to_string().dimmed(),
@@ -292,7 +365,12 @@ fn audit_crate(
                 );
                 if cli.verbose && !summary.patterns.is_empty() {
                     for pc in &summary.patterns {
-                        println!("    {} {} ({})", "·".dimmed(), format!("{:?}", pc.pattern), pc.count.to_string().yellow());
+                        println!(
+                            "    {} {} ({})",
+                            "·".dimmed(),
+                            format!("{:?}", pc.pattern),
+                            pc.count.to_string().yellow()
+                        );
                     }
                 }
                 result.pattern_analysis = Some(summary);
@@ -305,5 +383,9 @@ fn audit_crate(
 }
 
 fn phase(name: &str) {
-    println!("  {} {}", format!("[{}]", "Phase".dimmed()).dimmed(), name.bold());
+    println!(
+        "  {} {}",
+        format!("[{}]", "Phase".dimmed()).dimmed(),
+        name.bold()
+    );
 }

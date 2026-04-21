@@ -44,6 +44,46 @@ pub struct CountPair {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MiriResult {
+    pub verdict: MiriVerdict,
+    pub passed: bool,
+    pub tests_run: Option<usize>,
+    pub tests_passed: Option<usize>,
+    pub tests_failed: Option<usize>,
+    pub ub_detected: bool,
+    pub ub_message: Option<String>,
+    pub ub_location: Option<String>,
+    pub log_path: PathBuf,
+    pub duration_secs: f64,
+    pub strict: MiriRun,
+    pub baseline: Option<MiriRun>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MiriVerdict {
+    Clean,
+    TruePositiveUb,
+    StrictOnlySuspectedFalsePositive,
+    FailedNoUb,
+    Inconclusive,
+}
+
+impl std::fmt::Display for MiriVerdict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MiriVerdict::Clean => write!(f, "CLEAN"),
+            MiriVerdict::TruePositiveUb => write!(f, "TRUE POSITIVE UB"),
+            MiriVerdict::StrictOnlySuspectedFalsePositive => {
+                write!(f, "STRICT-ONLY SUSPECTED FP")
+            }
+            MiriVerdict::FailedNoUb => write!(f, "FAILED NO UB"),
+            MiriVerdict::Inconclusive => write!(f, "INCONCLUSIVE"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MiriRun {
+    pub flags: String,
     pub passed: bool,
     pub tests_run: Option<usize>,
     pub tests_passed: Option<usize>,
@@ -88,6 +128,8 @@ impl std::fmt::Display for FuzzStatus {
 pub struct FuzzTargetResult {
     pub target_name: String,
     pub status: FuzzStatus,
+    pub success: bool,
+    pub exit_code: Option<i32>,
     pub total_runs: Option<u64>,
     pub edges_covered: Option<u64>,
     pub duration_secs: u64,
