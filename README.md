@@ -1,37 +1,67 @@
-# unsafe_study -- Finding and Understanding `unsafe`-Related Failures in Real Rust Crates
+# unsafe_study -- Multi-Evidence Auditing of `unsafe` Rust Crates
 
-CSE 5349 final project. The deliverable is `unsafe-audit`, a Rust CLI that audits crates for unsafe code through four automated phases.
+CSE 5349 final project. The main deliverable is `unsafe-audit`, a Rust CLI that collects several complementary kinds of evidence about `unsafe` code in a crate.
+
+The project does **not** prove a crate safe or unsafe. Instead, it combines:
+
+- a syntactic proxy for `unsafe` surface area,
+- heuristic pattern classification for `unsafe`-related code,
+- Miri signals on exercised test paths,
+- and observable failures from existing fuzz harnesses.
+
+That evidence is then reported together so a human auditor can interpret scope, severity, and remaining uncertainty.
 
 ## The Tool: `unsafe-audit`
 
-A CLI tool that takes a crate path and runs the audit pipeline:
+A CLI tool that takes a crate path and runs the audit workflow:
 
-```
+```bash
 $ unsafe-audit ../targets/httparse --fuzz-time 60 --output /tmp/report
 ```
 
 ### What It Does
 
-| Phase | What | How |
-|-------|------|-----|
-| **1. Geiger scan** | Count unsafe functions/exprs/impls/traits/methods | `geiger` library API, walks crate source files under `src/` |
-| **2. Miri test** | Detect undefined behavior | Shells out `cargo miri test`, parses UB from log output |
-| **3. Fuzz run** | Find crashes, panics, OOMs | Discovers existing `cargo fuzz` targets, runs each with libFuzzer |
-| **4. Pattern analysis** | Classify unsafe code patterns by risk | `syn` AST visitor, 13 pattern categories, risk score 0-100 |
+| Phase | What it provides | Current implementation |
+|-------|-------------------|------------------------|
+| **1. Geiger scan** | A crate-local syntactic proxy for `unsafe` surface area | `geiger` library API over crate source files under `src/` |
+| **2. Miri test** | Execution-based UB signals on paths reached by tests | `cargo miri test`, with optional strict-vs-baseline triage |
+| **3. Fuzz run** | Observable failures under existing fuzz harnesses | discovers existing `cargo fuzz` targets, records exit status, artifacts, and basic stats |
+| **4. Pattern analysis** | Heuristic classification of `unsafe`-related code shapes | `syn` AST visitor, finding kinds, pattern categories, and a risk score |
 
-### What It Does NOT Do (Known Gap)
+### What It Does NOT Do
 
-**Automatic fuzz harness generation.** Phase 3 discovers and runs existing `fuzz/` directories that are already present in the target crate. It does not auto-generate harness code from API signatures. This means:
+- It does **not** prove the absence of UB.
+- It does **not** recover high-level invariants precisely.
+- It does **not** measure exploitability.
+- It does **not** auto-generate fuzz harnesses.
+- It does **not** auto-download crates from crates.io or git.
 
-- Crates that already have a local `fuzz/` directory work out of the box.
-- Crates without a `fuzz/` directory skip Phase 3 with a `NoFuzzDir` status.
-- To fuzz a new crate, you currently write the harness by hand or use `cargo fuzz init` + manual editing.
+### How To Read The Results
 
-This is the biggest remaining gap. See `DESIGN.md` for the planned auto-generation approach.
+The phases answer different questions:
 
-### Pattern Categories (Phase 4)
+- **Geiger**: how much `unsafe` syntax is present, and where?
+- **Pattern analysis**: what kinds of `unsafe`-adjacent operations appear?
+- **Miri**: did Miri report UB on the paths reached by tests?
+- **Fuzz**: do the available fuzz harnesses trigger visible failures?
 
-The AST analyzer classifies unsafe expressions into 13 categories:
+The outputs are intentionally **evidence**, not verdicts. For example:
+
+- A clean Miri run means no UB was observed on the exercised test paths, not that the crate is UB-free.
+- A clean fuzz run means no visible failure was found under the current harnesses and budget, not that the crate is robust against all inputs.
+- A high Geiger count means there is more `unsafe` syntax to inspect, not that the crate is necessarily less sound.
+
+## Pattern Analysis
+
+The AST analyzer emits structured findings. `FindingKind` distinguishes:
+
+- unsafe blocks,
+- unsafe function declarations,
+- unsafe impl declarations,
+- risky operations,
+- and extern items.
+
+`RiskyOperation` findings are classified into these categories:
 
 | Pattern | Severity | Example |
 |---------|----------|---------|
@@ -44,14 +74,16 @@ The AST analyzer classifies unsafe expressions into 13 categories:
 | `PtrReadWrite` | Medium | `std::ptr::read(ptr)`, `ptr::copy_nonoverlapping` |
 | `UncheckedIndex` | Medium | `slice.get_unchecked(i)` |
 | `SimdIntrinsic` | Medium | `_mm_load_si128(...)`, `_mm256_cmpeq_epi8` |
-| `UnionAccess` | Medium | `my_union.field` |
+| `UnionAccess` | Medium | Reserved for future typed union-field detection |
 | `ExternBlock` | Medium | `extern "C" { fn malloc(size: usize); }` |
 | `AddrOf` | Low | `std::ptr::addr_of!(field)` |
-| `OtherUnsafe` | Low | catch-all for remaining unsafe expressions |
+| `OtherUnsafe` | Low | unsafe block/declaration marker or uncategorized unsafe context |
 
-Risk score formula: weighted severity sum / file count, square-root scaled, capped at 100. Bands: <20 LOW, <50 MEDIUM, >=50 HIGH.
+Important limitation: these categories are **heuristic structural classifications**. They hint at the kinds of assumptions the code may rely on, but they do not reconstruct those assumptions precisely.
 
-### Usage
+Risk score is a heuristic summary computed from finding counts and severity weights. It is useful for rough prioritization, not as a security metric.
+
+## Usage
 
 ```bash
 cd unsafe-audit
@@ -72,15 +104,14 @@ cargo build --release
 # List discovered crates without running
 ./target/release/unsafe-audit ../targets --batch --list
 
-# Custom Miri flags
+# Strict-vs-baseline Miri triage
 ./target/release/unsafe-audit ../targets/serde_json \
-  --miri-flags "-Zmiri-strict-provenance" \
-  --skip-fuzz --output /tmp/serde-no-sym
+  --miri-triage --skip-fuzz --output /tmp/serde-triage
 ```
 
 CLI flags:
 
-```
+```text
 PATH                          Crate dir, or parent dir with --batch
 --batch                       Treat PATH as directory of crates
 --skip-geiger                 Skip Phase 1
@@ -88,6 +119,7 @@ PATH                          Crate dir, or parent dir with --batch
 --skip-fuzz                   Skip Phase 3
 --skip-patterns               Skip Phase 4
 --miri-flags <FLAGS>          MIRIFLAGS (default: strict provenance + symbolic alignment)
+--miri-triage                 Re-run baseline Miri when strict Miri reports UB
 --fuzz-time <SECONDS>         Per-target fuzz budget (default: 60)
 --fuzz-env <KEY=VALUE>        Extra env vars for fuzz (repeatable)
 --output <DIR>                Report output directory (default: <path>/unsafe-audit-report)
@@ -96,90 +128,53 @@ PATH                          Crate dir, or parent dir with --batch
 -v, --verbose                 Show pattern details
 ```
 
-### Output
+## Output
 
 Two files per run:
 
-**report.json** -- machine-readable, full structured data. Shortened example from the smoke-test output:
-```json
-{
-  "timestamp": "2026-04-20T01:09:36.208481574-04:00",
-  "crates": [{
-    "target": {
-      "name": "httparse",
-      "dir": "/path/to/targets/httparse"
-    },
-    "geiger": {
-      "crate_name": "httparse",
-      "crate_version": "?.?.?",
-      "used": {
-        "exprs": { "safe": 702, "unsafe_": 335 }
-      },
-      "forbids_unsafe": false,
-      "files_scanned": 9
-    },
-    "miri": null,
-    "fuzz": [],
-    "pattern_analysis": {
-      "crate_name": "httparse",
-      "crate_version": "1.10.1",
-      "total_unsafe_exprs": 901,
-      "files_with_unsafe": 8,
-      "files_scanned": 9,
-      "risk_score": 68.4,
-      "patterns": [
-        { "pattern": "OtherUnsafe", "count": 791 },
-        { "pattern": "SimdIntrinsic", "count": 80 }
-      ]
-    }
-  }]
-}
-```
+- `report.json`: machine-readable structured evidence
+- `report.md`: human-readable summary with per-phase sections
 
-**report.md** -- human-readable summary with tables, one section per phase.
+Representative fields in `report.json` include:
 
-## Study Results (12 Crates)
+- Geiger counts (`functions`, `exprs`, `item_impls`, ...)
+- Miri verdict plus strict/baseline run details
+- Fuzz status, exit code, artifact path, run count, and edge coverage
+- Pattern findings, finding kinds, pattern counts, and risk score
 
-| Crate | Unsafe Exprs | Risk | Miri | Fuzz |
-|-------|-------------|------|------|------|
-| httparse | 901 | 68.4 HIGH | CLEAN | 399M runs, 0 crashes |
-| simd-json | 6117 | 62.5 HIGH | Stacked Borrows UB | CLEAN |
-| memchr | 7191 | 70.3 HIGH | CLEAN | CLEAN |
-| bstr | 758 | 34.9 MED | FP: alignment | 767K runs, 0 crashes |
-| serde_json | 156 | 15.5 LOW | FP: memchr align | 22M runs, 0 crashes |
-| pulldown-cmark | 201 | 27.8 MED | CLEAN | OOM, 480B reproducer |
-| toml_edit | 0 | 0.0 LOW | CLEAN | PANIC, 9B reproducer |
-| others | varies | varies | CLEAN | CLEAN |
+## Study Results
 
-Key findings:
+The repository includes study data and reports for 12 crates. Those artifacts should be read with the same interpretation rules above:
 
-- **simd-json**: True positive Stacked Borrows violation. See `report/simd_json_stacked_borrows_explainer.md` and upstream issue draft `report/simd_json_upstream_issue_draft.md`.
-- **serde_json & bstr**: Miri alignment false positives confirmed by two-pass triage.
-- **toml_edit & pulldown-cmark**: Fuzz found bugs in safe Rust despite clean Miri -- strongest complementarity evidence.
+- Geiger counts are a syntactic proxy for `unsafe` surface.
+- Miri findings apply to the test paths that actually executed.
+- Fuzz findings apply to the existing harnesses and budgets that were run.
+
+They are useful comparative evidence, but not complete security judgments.
 
 ## Project Structure
 
-```
+```text
 unsafe-audit/           # Main deliverable
   src/
-    main.rs                   # CLI entry, crate discovery, phase orchestration
-    analyzer.rs               # syn AST unsafe pattern classifier (Phase 4)
-    geiger.rs                 # geiger library integration (Phase 1)
-    miri.rs                   # cargo miri test runner + UB log parser (Phase 2)
-    fuzz.rs                   # cargo-fuzz target discovery + runner (Phase 3)
-    report_gen.rs             # JSON + Markdown report generation
-    models.rs                 # Shared types (CrateAuditResult, MiriResult, etc.)
+    main.rs             # CLI entry, crate discovery, phase orchestration
+    analyzer.rs         # AST-based finding extraction and pattern classification
+    geiger.rs           # geiger library integration
+    miri.rs             # cargo miri runner + strict/baseline verdicts
+    fuzz.rs             # cargo-fuzz discovery, runner, exit/artifact capture
+    report_gen.rs       # JSON + Markdown report generation
+    models.rs           # Shared result types
   Cargo.toml
 
-extensions_harness/           # Targeted smoke tests for Tier 2 crates
-fuzz_corpus/                  # Seed corpora
-fuzz_findings/                # Fuzz artifacts
-geiger_reports/               # Archived geiger outputs + annotations
-miri_reports/                 # Miri logs + triage notes
-report/                       # Final report + supporting writeups
-scripts/                      # Original shell pipeline (run_all.sh, run_fuzz.sh)
-Dockerfile                    # Reproducible environment
-demo_video.mp4                # Walkthrough video
+extensions_harness/     # Targeted smoke tests for Tier 2 crates
+fuzz_corpus/            # Seed corpora
+fuzz_findings/          # Fuzz artifacts
+geiger_reports/         # Archived geiger outputs + annotations
+miri_reports/           # Miri logs + triage notes
+report/                 # Final report + supporting writeups
+scripts/                # Original shell pipeline
+Dockerfile              # Reproducible environment
+demo_video.mp4          # Walkthrough video
 ```
 
 ## Reproduce
@@ -204,7 +199,9 @@ cargo install cargo-fuzz
 
 cd unsafe-audit
 cargo run -- ../targets/httparse \
-  --fuzz-time 60 --output /tmp/full
+  --miri-triage \
+  --fuzz-time 60 \
+  --output /tmp/full
 ```
 
 ### Docker
@@ -212,12 +209,6 @@ cargo run -- ../targets/httparse \
 ```bash
 docker build -t unsafe-study .
 docker run --rm -it unsafe-study
-```
-
-### Original Shell Pipeline
-
-```bash
-bash scripts/run_all.sh --crates httparse --fuzz-time 60
 ```
 
 ## Toolchain

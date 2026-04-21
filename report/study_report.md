@@ -66,7 +66,7 @@ cross-crate comparison of the same dependency's unsafe impact.
 
 ### httparse -- [OK] CLEAN
 - All tests passed under Miri with strict provenance
-- No UB detected
+- No UB observed on the exercised test paths
 - Full log: `miri_reports/httparse.log`
 
 ### serde_json -- [X] UB DETECTED
@@ -93,9 +93,9 @@ _mm_load_si128 (SSE2 intrinsic, requires 16-byte alignment)
   <- test_parse_number_errors
 ```
 
-**Classification**: Alignment-based UB in `memchr` 2.8.0 SSE2 path.
-The `_mm_load_si128` intrinsic requires 16-byte aligned memory, but
-`load_aligned` is called with a pointer that has only 1-byte alignment.
+**Initial classification**: Alignment-related Miri UB report in the `memchr`
+2.8.0 SSE2 path. At this stage, the report indicated that `_mm_load_si128`
+was being reached from a pointer Miri tracked as alignment 1.
 
 **Note**: Miri reports this with the caveat: "but due to
 `-Zmiri-symbolic-alignment-check`, alignment errors can also be false
@@ -128,15 +128,15 @@ error: Undefined Behavior: accessing memory based on pointer with alignment 1,
   <- ascii::tests::positive_fallback_forward  (src/ascii.rs:275)
 ```
 
-**Classification**: Alignment-based UB in bstr's *direct* code (not a dependency).
-The `first_non_ascii_byte_fallback` function casts a `*const u8` (alignment 1)
-to `*const usize` (alignment 8) and dereferences it. This is an explicit
-violation of Rust's alignment requirements for pointer dereferences.
+**Initial classification**: Alignment-related Miri UB report in bstr's *direct*
+code (not a dependency). The `first_non_ascii_byte_fallback` function casts a
+`*const u8` (alignment 1) to `*const usize` (alignment 8) and dereferences it,
+which Miri reported as undefined behavior under the symbolic alignment check.
 
-**Root cause**: `src/ascii.rs` line 80 performs a "word-at-a-time" optimization
-to check multiple bytes for ASCII-ness simultaneously. The fallback path
-starts reading from a byte-aligned pointer without first aligning it to a
-`usize` boundary.
+**Working hypothesis at this stage**: `src/ascii.rs` line 80 performs a
+"word-at-a-time" optimization to check multiple bytes for ASCII-ness
+simultaneously. The fallback path appeared, under Miri's symbolic alignment
+model, to read from a byte-aligned pointer before alignment was established.
 
 **Note**: The same `-Zmiri-symbolic-alignment-check` caveat applies: alignment
 errors can be false positives under symbolic checking. However, unlike the
@@ -164,8 +164,9 @@ the `from_str` test at `src/impls.rs:1158`). We patched the test with
 - httparse is self-contained; all `unsafe` is direct and Miri-clean
 - serde_json and bstr both depend heavily on `memchr`, which is where Miri found alignment
   reports for serde_json. bstr's report is in its *own* code, not a dependency.
-- Both alignment findings are **false positives from `-Zmiri-symbolic-alignment-check`**:
-  re-running without this flag produces clean results for both crates
+- Under the follow-up triage described below, both alignment findings were
+  classified as **false positives from `-Zmiri-symbolic-alignment-check`**
+  because re-running without this flag produced clean results for both crates
 - The code correctly aligns pointers numerically before dereferencing; Miri's symbolic
   checker tracks provenance-based alignment which is overly conservative here
 
@@ -175,8 +176,9 @@ Both UB findings were re-investigated by running Miri **without** `-Zmiri-symbol
 - **serde_json**: All 97 tests pass clean (including `test_parse_number_errors`)
 - **bstr**: `positive_fallback_forward` passes clean; all completed tests pass
 
-**Conclusion**: Both findings are false positives. The code aligns pointers correctly
-at runtime; the symbolic checker's provenance-based analysis is too conservative.
+**Conclusion**: Under the follow-up triage, both findings were classified as
+false positives. The code aligns pointers numerically at runtime; the symbolic
+checker tracks provenance-based alignment more conservatively.
 
 ## Fuzzing Results (2026-03-05)
 
@@ -192,7 +194,8 @@ All fuzzing ran on native Debian Linux with cargo-fuzz/libFuzzer, 300s per targe
 | serde_json | from_str | 10,943,428 | 914 | 0 |
 | bstr | bstr_fuzz_ops | 766,553 | 709 | 0 |
 
-**Total**: 422,088,941 iterations across 7 targets, 0 crashes.
+**Total**: 422,088,941 iterations across 7 targets, 0 observed crashes under the
+available harnesses and 300-second budget.
 
 ## Next Steps
 
@@ -233,10 +236,12 @@ Mapping our findings back to the proposal goals:
 - **False positive analysis**: `-Zmiri-symbolic-alignment-check` produces findings that
   require careful investigation to distinguish from true UB.
 
-**Strongest result**: All three crates proved robust under both Miri (strict provenance)
-and fuzzing (422M iterations). The alignment patterns flagged by Miri's symbolic checker,
-while not true UB, highlight code that depends on x86_64's tolerant alignment behavior
-and would benefit from using `read_unaligned` for portability.
+**Strongest result**: Across the current Miri setup (strict provenance) and
+the available fuzz harnesses (422M iterations), the three baseline crates
+produced no confirmed bug findings. The alignment patterns flagged by Miri's
+symbolic checker, while not classified as true UB in this study, still
+highlight code that depends on x86_64's tolerant alignment behavior and would
+benefit from using `read_unaligned` for portability.
 
 ## Additional Target Batch (2026-03-11)
 

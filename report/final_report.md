@@ -8,7 +8,7 @@
 
 ## 1. Introduction
 
-This report presents a case study on `unsafe`-related failures in real-world, input-facing Rust crates. We applied a three-phase methodology -- hotspot mining, Miri-based UB detection, and coverage-guided fuzzing -- and compared the findings across tools.
+This report presents a case study on `unsafe`-related findings in real-world, input-facing Rust crates. We applied a three-phase methodology -- hotspot mining, Miri-based UB detection, and coverage-guided fuzzing -- and compared the evidence each tool produced.
 
 The study proceeded in two rounds. A **baseline study** (Sections 3--6) covers three crates at full depth (Tier 1). An **extension batch** (Section 10) adds nine more crates at targeted depth (Tier 2). All 12 crates share the same three-phase pipeline shape, but differ in coverage depth as detailed in Section 2.5.
 
@@ -30,20 +30,21 @@ Cross-crate dependency overlap: both serde_json and bstr depend on **memchr 2.8.
 
 This section formalizes the study protocol. The three-phase pipeline --
 hotspot mining, Miri-based UB detection, and coverage-guided fuzzing -- was
-designed so that each phase narrows the search space established by the
-previous one and covers a complementary class of defects.
+designed so that each phase contributes a different kind of evidence and
+covers a complementary class of risk.
 
 ### 2.1 Study Design Overview
 
-| Phase | Tool | Question answered | Defect class |
+| Phase | Tool | Question answered | Evidence produced |
 |-------|------|-------------------|--------------|
-| 1. Hotspot mining | `cargo-geiger` | Where does `unsafe` concentrate? | (informational -- guides Phases 2--3) |
-| 2. Miri testing | `cargo miri test` | Do existing test paths violate `unsafe` invariants? | Undefined behavior on executed paths |
-| 3. Fuzzing | `cargo-fuzz` (libFuzzer) | Do novel inputs trigger crashes, panics, or resource exhaustion? | Robustness failures from unexplored input space |
+| 1. Hotspot mining | `cargo-geiger` | Where does `unsafe` syntax concentrate? | Syntactic proxy for local `unsafe` surface |
+| 2. Miri testing | `cargo miri test` | Does Miri report UB on existing test paths? | UB signals on executed paths |
+| 3. Fuzzing | `cargo-fuzz` (libFuzzer) | Do novel inputs trigger crashes, panics, or resource exhaustion? | Observable failures under the available harnesses |
 
 Phase 1 output feeds into Phase 2 (prioritize crates/modules with high
 `unsafe` density) and Phase 3 (target fuzz harnesses at input-facing APIs
-adjacent to `unsafe` hotspots).
+adjacent to `unsafe` hotspots). None of the three phases alone proves a
+crate safe or unsafe; the study relies on their combined evidence.
 
 ### 2.2 Miri Testing Protocol
 
@@ -64,7 +65,7 @@ MIRIFLAGS="-Zmiri-strict-provenance"
 
 | Pass 1 | Pass 2 | Classification | Action |
 |--------|--------|----------------|--------|
-| CLEAN  | --     | No UB detected | Record as clean |
+| CLEAN  | --     | No UB observed on exercised paths | Record as clean under this coverage |
 | UB     | UB (same site) | **True positive** | Minimize reproducer, trace to responsible `unsafe` block, draft upstream report |
 | UB     | UB (different site) | **True positive** + re-triage Pass 1 site | Pass 2 site is a true positive; Pass 1 site may still be an FP -- apply code-level audit to both |
 | UB     | CLEAN  | **Suspected false positive** | Perform code-level audit of the flagged site; confirm pointer is numerically aligned before dereference |
@@ -102,7 +103,7 @@ design rules:
    | SEGV / SIGABRT / ASan report | Memory safety violation | Critical |
    | Rust panic (unwrap, assert, index OOB) | Logic / robustness bug | Moderate |
    | libFuzzer OOM / timeout | Resource exhaustion / DoS | Moderate |
-   | Clean exit after budget | No finding | -- |
+   | Clean exit after budget | No finding under current harness/budget | -- |
 
 ### 2.4 Fuzz Budget Allocation
 
@@ -218,7 +219,7 @@ Miri was run with `MIRIFLAGS="-Zmiri-symbolic-alignment-check -Zmiri-strict-prov
 
 All tests passed under Miri. No undefined behavior detected.
 
-This is consistent with httparse's careful use of unaligned loads (`_mm_lddqu_si128`, `read_unaligned`) throughout its SIMD and SWAR code paths.
+This is consistent with httparse's current exercised test paths, which include careful use of unaligned loads (`_mm_lddqu_si128`, `read_unaligned`) in its SIMD and SWAR code paths.
 
 ### serde_json -- Alignment UB in memchr (FALSE POSITIVE)
 
@@ -264,7 +265,7 @@ error: Undefined Behavior: accessing memory based on pointer with alignment 1,
 
 | Crate | Pass 1 (strict + symbolic) | Pass 2 (strict only) | Classification |
 |-------|---------------------------|---------------------|----------------|
-| httparse | CLEAN | -- | No UB detected |
+| httparse | CLEAN | -- | No UB observed on exercised paths |
 | serde_json | UB: memchr SSE2 `load_aligned` | **CLEAN** | **Confirmed FP** (audit: pointer numerically aligned) |
 | bstr | UB: `ascii.rs:80` word-at-a-time | **CLEAN** | **Confirmed FP** (audit: pointer bumped to usize boundary before loop) |
 
@@ -272,8 +273,8 @@ Both UB findings were classified as **confirmed false positives** under the
 two-pass triage protocol (Section 2.2). Pass 1 flagged provenance-based
 alignment, Pass 2 confirmed no UB without the symbolic checker, and
 code-level audit verified that both sites numerically align pointers before
-dereference. No true undefined behavior was detected in any of the three
-crates.
+dereference. Under the exercised Tier 1 test coverage, we did not confirm a
+true UB finding in any of the three crates.
 
 ---
 
@@ -308,7 +309,7 @@ All fuzzing was run on Debian Linux with cargo-fuzz (libFuzzer backend), 300 sec
 
 **Key question answered**: The fuzzer did NOT trigger any crashes related to the memchr SSE2 aligned-load path. This is consistent with the Miri finding being a false positive -- on real x86_64 hardware, the aligned loads operate on properly aligned memory at runtime.
 
-**Result**: No crashes in ~22M total iterations. serde_json's parser handles arbitrary byte input robustly.
+**Result**: No crashes in ~22M total iterations under the available harnesses and 300-second budget.
 
 ### bstr
 
@@ -320,7 +321,7 @@ All fuzzing was run on Debian Linux with cargo-fuzz (libFuzzer backend), 300 sec
 
 **Key question answered**: Fuzzing did NOT trigger any crash from the `first_non_ascii_byte_fallback` alignment path. On x86_64, misaligned usize reads are handled transparently by the CPU (performance penalty only, no fault), so even if the pointer were truly misaligned, no crash would result on this architecture. This further supports the Miri finding being a symbolic-check false positive.
 
-**Result**: No crashes in ~767K iterations. Lower iteration count is expected due to bstr_fuzz_ops exercising multiple API calls per input (grapheme/word/line iteration, find operations, UTF-8 validation).
+**Result**: No crashes in ~767K iterations. Lower iteration count is expected due to bstr_fuzz_ops exercising multiple API calls per input (grapheme/word/line iteration, find operations, UTF-8 validation), so the clean result carries less confidence than the higher-throughput targets.
 
 ### Fuzzing Summary
 
@@ -331,7 +332,7 @@ All fuzzing was run on Debian Linux with cargo-fuzz (libFuzzer backend), 300 sec
 | bstr | 1 | 766,553 | 5 min | 0 | Lower -- multi-API harness limits throughput; 709 edges with <1M runs |
 | **Total** | **7** | **422,088,941** | **35 min** | **0** | |
 
-No crashes, panics, or memory safety issues were found across 422M fuzz iterations. Per Section 2.4, the confidence of each crate's clean result varies with throughput and edge coverage.
+No crashes or panics were observed across 422M fuzz iterations. Per Section 2.4, the confidence of each crate's clean result varies with throughput, edge coverage, and harness scope.
 
 ---
 
@@ -358,9 +359,9 @@ No crashes, panics, or memory safety issues were found across 422M fuzz iteratio
 
 ### Complementarity
 
-- **Miri excels at**: Detecting semantic UB (alignment, provenance, uninitialized memory) that may never cause observable symptoms on real hardware. Even our false positives flagged code patterns worth reviewing.
+- **Miri excels at**: Reporting semantic UB signals (alignment, provenance, uninitialized memory) on exercised paths, including cases that may never cause observable symptoms on real hardware. Even the false positives in this study flagged code patterns worth reviewing.
 - **Fuzzing excels at**: Finding robustness issues, panics, and logic errors from inputs no human wrote. Coverage-guided fuzzing reaches code paths that existing test suites may miss.
-- **Neither found true bugs in the baseline crates**: All three proved robust under both tools. This is a positive result for these mature, well-maintained libraries. However, the extension batch (Section 10) produced two fuzz findings (`toml_edit` panic, `pulldown-cmark` OOM) despite all-clean Miri results -- the strongest evidence in this study for Miri/fuzzing complementarity.
+- **Neither produced a confirmed bug finding in the baseline crates under the current study setup**: this is encouraging evidence for these mature, well-maintained libraries, but not proof of absence. However, the extension batch (Section 10) produced two fuzz findings (`toml_edit` panic, `pulldown-cmark` OOM) despite all-clean Miri results -- the strongest evidence in this study for Miri/fuzzing complementarity.
 
 ### Key Insight: Architecture Masks UB
 
@@ -381,7 +382,7 @@ the properties of the studied crates, rather than artifacts of our tooling
 or procedure.
 
 1. **Miri symbolic-alignment false positives.** Both baseline Miri UB
-   reports were confirmed false positives under the two-pass triage protocol
+   reports were classified as confirmed false positives under the two-pass triage protocol
    (Section 2.2). The `-Zmiri-symbolic-alignment-check` flag tracks
    provenance-based alignment, which can disagree with numeric alignment.
    Our classification protocol mitigates this, but a risk remains that a
@@ -514,7 +515,7 @@ bash scripts/run_fuzz.sh httparse parse_request 300  # Single target
 |------|--------|----------|
 | **G1**: Hotspot map | [OK] Complete | Geiger scans + per-crate annotations in `geiger_reports/*_annotations.md` |
 | **G2**: Run Miri + fuzzing | [OK] Complete | 2 Miri findings (false positives), 0 fuzz crashes across 422M iterations |
-| **G3**: Cross-tool comparison | [OK] Complete | Section 6 above; Miri finds semantic UB, fuzzing tests robustness, neither found true bugs |
+| **G3**: Cross-tool comparison | [OK] Complete | Section 6 above; Miri reports UB signals on executed paths, fuzzing tests robustness, neither produced a confirmed baseline bug finding under the current setup |
 
 ### What the proposal got right
 
@@ -531,9 +532,9 @@ bash scripts/run_fuzz.sh httparse parse_request 300  # Single target
 
 ### Strongest result
 
-The baseline study demonstrates that three widely-used Rust crates (httparse, serde_json, bstr) with combined 687 direct unsafe expressions and ~5,600 dependency unsafe items are robust under both Miri and fuzzing. The alignment patterns flagged by Miri's symbolic checker, while technically concerning from a portability standpoint (they depend on x86_64's tolerant alignment behavior), are false positives in practice because the code correctly aligns pointers before dereferencing.
+The baseline study shows that three widely-used Rust crates (httparse, serde_json, bstr) with combined 687 direct unsafe expressions and ~5,600 dependency unsafe items produced no confirmed bug findings under the current Miri and fuzz setups. The alignment patterns flagged by Miri's symbolic checker, while technically concerning from a portability standpoint (they depend on x86_64's tolerant alignment behavior), were classified as false positives in this study because code-level audit found that the pointers are aligned before dereference.
 
-The extension batch strengthened the Miri-vs-fuzzing complementarity finding: 9/9 crates passed Miri clean, yet fuzzing discovered a parser panic in `toml_edit` and resource exhaustion in `pulldown-cmark` -- both in safe Rust, invisible to Miri by design. This is the clearest evidence that the two tools cover genuinely disjoint defect classes.
+The extension batch strengthened the Miri-vs-fuzzing complementarity finding: 9/9 crates were Miri-clean under the current Tier 2 harnesses, yet fuzzing discovered a parser panic in `toml_edit` and resource exhaustion in `pulldown-cmark` -- both in safe Rust, and neither observed under the Miri setup used here. This is the clearest evidence in the study that the two tools surface different kinds of evidence.
 
 ---
 
