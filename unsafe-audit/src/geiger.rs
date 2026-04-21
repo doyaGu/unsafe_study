@@ -14,10 +14,7 @@ use crate::models::{GeigerMetrics, GeigerResult};
 /// Uses the `geiger` library directly (no subprocess), walking the crate's
 /// `src/` directory and any top-level `.rs` files, aggregating counts.
 pub fn run_geiger(crate_dir: &Path) -> Result<GeigerResult> {
-    let crate_name = crate_dir
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or("unknown".into());
+    let (crate_name, crate_version) = read_crate_metadata(crate_dir);
 
     let mut used = GeigerMetrics::default();
     let mut forbids_unsafe = false;
@@ -56,9 +53,6 @@ pub fn run_geiger(crate_dir: &Path) -> Result<GeigerResult> {
         }
     }
 
-    // Read version from Cargo.toml if possible
-    let crate_version = read_crate_version(crate_dir);
-
     Ok(GeigerResult {
         crate_name,
         crate_version,
@@ -82,21 +76,31 @@ fn merge_counter_block(target: &mut GeigerMetrics, cb: &cargo_geiger_serde::Coun
     target.methods.unsafe_ += cb.methods.unsafe_;
 }
 
-fn read_crate_version(crate_dir: &Path) -> String {
+fn read_crate_metadata(crate_dir: &Path) -> (String, String) {
     let toml_path = crate_dir.join("Cargo.toml");
     let content = std::fs::read_to_string(&toml_path).unwrap_or_default();
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("version") {
-            if let Some(eq) = trimmed.find('=') {
-                let v = trimmed[eq + 1..].trim().trim_matches('"').trim();
-                return v.to_string();
-            }
-        }
-        // Stop at first section
-        if trimmed.starts_with('[') {
-            break;
-        }
-    }
-    "?.?.?".into()
+    let parsed = content.parse::<toml::Value>().ok();
+    let package = parsed
+        .as_ref()
+        .and_then(|value| value.get("package"))
+        .and_then(|value| value.as_table());
+
+    let name = package
+        .and_then(|pkg| pkg.get("name"))
+        .and_then(|value| value.as_str())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            crate_dir
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+        })
+        .unwrap_or_else(|| "unknown".into());
+
+    let version = package
+        .and_then(|pkg| pkg.get("version"))
+        .and_then(|value| value.as_str())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| "?.?.?".into());
+
+    (name, version)
 }
