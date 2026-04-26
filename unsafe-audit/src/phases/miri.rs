@@ -1,59 +1,82 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
+use std::collections::BTreeMap;
 use std::path::Path;
-use std::process::Command;
-use std::time::Instant;
 
-use crate::models::{MiriResult, MiriRun, MiriScope, MiriUbCategory, MiriVerdict};
+use crate::domain::{
+    CommandInvocation, MiriResult, MiriRun, MiriScope, MiriUbCategory, MiriVerdict,
+};
+use crate::infra::{CommandRunner, CommandSpec};
 
-// =========================================================================
-// Phase 2: Miri — run `cargo miri test` and parse output for UB
-// =========================================================================
-
-pub fn run_miri(crate_dir: &Path, miri_flags: &str, log_path: &Path) -> Result<MiriResult> {
-    let strict = run_miri_once(crate_dir, miri_flags, log_path)?;
-    Ok(result_from_runs(strict, None))
+pub fn run(
+    crate_dir: &Path,
+    scope: MiriScope,
+    harness_dir: Option<&Path>,
+    cargo_args: &[String],
+    miri_flags: &str,
+    log_path: &Path,
+) -> Result<MiriResult> {
+    let invocation = invocation(crate_dir, harness_dir, cargo_args);
+    let primary_run = run_once(&invocation, miri_flags, log_path)?;
+    Ok(result_from_runs(scope, invocation, primary_run, None))
 }
 
-pub fn run_miri_with_triage(
+pub fn run_with_triage(
     crate_dir: &Path,
+    scope: MiriScope,
+    harness_dir: Option<&Path>,
+    cargo_args: &[String],
     strict_flags: &str,
     baseline_flags: &str,
     strict_log_path: &Path,
     baseline_log_path: &Path,
 ) -> Result<MiriResult> {
-    let strict = run_miri_once(crate_dir, strict_flags, strict_log_path)?;
-    let baseline = if strict.ub_detected {
-        Some(run_miri_once(crate_dir, baseline_flags, baseline_log_path)?)
+    let invocation = invocation(crate_dir, harness_dir, cargo_args);
+    let primary_run = run_once(&invocation, strict_flags, strict_log_path)?;
+    let baseline_run = if primary_run.ub_detected {
+        Some(run_once(&invocation, baseline_flags, baseline_log_path)?)
     } else {
         None
     };
-    Ok(result_from_runs(strict, baseline))
+    Ok(result_from_runs(
+        scope,
+        invocation,
+        primary_run,
+        baseline_run,
+    ))
 }
 
-fn run_miri_once(crate_dir: &Path, miri_flags: &str, log_path: &Path) -> Result<MiriRun> {
-    let start = Instant::now();
+fn invocation(
+    crate_dir: &Path,
+    harness_dir: Option<&Path>,
+    cargo_args: &[String],
+) -> CommandInvocation {
+    let args = if cargo_args.is_empty() {
+        vec!["miri".into(), "test".into()]
+    } else {
+        cargo_args.to_vec()
+    };
+    CommandInvocation {
+        working_dir: harness_dir.unwrap_or(crate_dir).to_path_buf(),
+        args,
+    }
+}
 
-    let output = Command::new("cargo")
-        .args(["miri", "test"])
-        .current_dir(crate_dir)
-        .env("MIRIFLAGS", miri_flags)
-        .output()
-        .context("running cargo miri test")?;
-
-    let duration = start.elapsed().as_secs_f64();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let combined = format!("{}\n{}", stdout, stderr);
-
-    std::fs::write(log_path, &combined)?;
-
-    let passed = output.status.success();
+fn run_once(invocation: &CommandInvocation, miri_flags: &str, log_path: &Path) -> Result<MiriRun> {
+    let mut env = BTreeMap::new();
+    env.insert("MIRIFLAGS".into(), miri_flags.to_string());
+    let (execution, combined) = CommandRunner::run(&CommandSpec {
+        program: "cargo".into(),
+        args: invocation.args.clone(),
+        env,
+        current_dir: invocation.working_dir.clone(),
+        log_path: log_path.to_path_buf(),
+    })?;
     let (tests_run, tests_passed, tests_failed) = parse_test_summary(&combined);
     let (ub_detected, ub_category, ub_message, ub_location) = extract_ub(&combined);
 
     Ok(MiriRun {
         flags: miri_flags.to_string(),
-        passed,
+        execution,
         tests_run,
         tests_passed,
         tests_failed,
@@ -61,51 +84,39 @@ fn run_miri_once(crate_dir: &Path, miri_flags: &str, log_path: &Path) -> Result<
         ub_category,
         ub_message,
         ub_location,
-        log_path: log_path.to_path_buf(),
-        duration_secs: duration,
     })
 }
 
-fn result_from_runs(strict: MiriRun, baseline: Option<MiriRun>) -> MiriResult {
-    let verdict = classify_verdict(&strict, baseline.as_ref());
-    let triage_summary = summarize_triage(&strict, baseline.as_ref(), verdict);
-    let duration_secs = strict.duration_secs
-        + baseline
-            .as_ref()
-            .map(|run| run.duration_secs)
-            .unwrap_or(0.0);
-
+fn result_from_runs(
+    scope: MiriScope,
+    invocation: CommandInvocation,
+    primary_run: MiriRun,
+    baseline_run: Option<MiriRun>,
+) -> MiriResult {
+    let verdict = classify_verdict(&primary_run, baseline_run.as_ref());
+    let triage_summary = summarize_triage(&primary_run, baseline_run.as_ref(), verdict);
     MiriResult {
-        scope: MiriScope::FullSuite,
+        scope,
+        invocation,
         verdict,
         triage_summary,
-        passed: strict.passed,
-        tests_run: strict.tests_run,
-        tests_passed: strict.tests_passed,
-        tests_failed: strict.tests_failed,
-        ub_detected: strict.ub_detected,
-        ub_category: strict.ub_category,
-        ub_message: strict.ub_message.clone(),
-        ub_location: strict.ub_location.clone(),
-        log_path: strict.log_path.clone(),
-        duration_secs,
-        strict,
-        baseline,
+        primary_run,
+        baseline_run,
     }
 }
 
 fn classify_verdict(strict: &MiriRun, baseline: Option<&MiriRun>) -> MiriVerdict {
-    if strict.passed && !strict.ub_detected {
+    if strict.execution.success && !strict.ub_detected {
         return MiriVerdict::Clean;
     }
-
     if !strict.ub_detected {
         return MiriVerdict::FailedNoUb;
     }
-
     match baseline {
         Some(baseline) if baseline.ub_detected => MiriVerdict::TruePositiveUb,
-        Some(baseline) if baseline.passed => MiriVerdict::StrictOnlySuspectedFalsePositive,
+        Some(baseline) if baseline.execution.success => {
+            MiriVerdict::StrictOnlySuspectedFalsePositive
+        }
         Some(_) => MiriVerdict::Inconclusive,
         None => MiriVerdict::Inconclusive,
     }
@@ -163,7 +174,6 @@ fn parse_test_summary(output: &str) -> (Option<usize>, Option<usize>, Option<usi
         (Some(p), None) => Some(p),
         _ => None,
     };
-
     (total_run, total_passed, total_failed)
 }
 
@@ -217,7 +227,10 @@ fn extract_ub(output: &str) -> (bool, Option<MiriUbCategory>, Option<String>, Op
 fn classify_ub_category(line: &str) -> Option<MiriUbCategory> {
     if line.contains("alignment") {
         Some(MiriUbCategory::Alignment)
-    } else if line.contains("stacked borrow") || line.contains("provenance") || line.contains("retag") {
+    } else if line.contains("stacked borrow")
+        || line.contains("provenance")
+        || line.contains("retag")
+    {
         Some(MiriUbCategory::Provenance)
     } else if line.contains("out-of-bounds") || line.contains("out of bounds") {
         Some(MiriUbCategory::OutOfBounds)
@@ -239,12 +252,19 @@ fn category_or_dash(category: Option<MiriUbCategory>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::ExecutionOutcome;
     use std::path::PathBuf;
 
-    fn run(passed: bool, ub_detected: bool) -> MiriRun {
+    fn run(success: bool, ub_detected: bool) -> MiriRun {
         MiriRun {
             flags: String::new(),
-            passed,
+            execution: ExecutionOutcome {
+                success,
+                exit_code: None,
+                duration_secs: 0.0,
+                log_path: PathBuf::from("miri.log"),
+                log_excerpt: None,
+            },
             tests_run: None,
             tests_passed: None,
             tests_failed: None,
@@ -256,24 +276,19 @@ mod tests {
             },
             ub_message: None,
             ub_location: None,
-            log_path: PathBuf::from("miri.log"),
-            duration_secs: 0.0,
         }
     }
 
     #[test]
     fn parses_clean_test_summary() {
         let output = "test result: ok. 3 passed; 0 failed; 1 ignored";
-
         assert_eq!(parse_test_summary(output), (Some(3), Some(3), Some(0)));
     }
 
     #[test]
     fn extracts_ub_and_location() {
         let output = "error: Undefined Behavior: out-of-bounds pointer use\n --> src/lib.rs:10:5";
-
         let (ub, category, message, location) = extract_ub(output);
-
         assert!(ub);
         assert_eq!(category, Some(MiriUbCategory::OutOfBounds));
         assert_eq!(
@@ -285,12 +300,12 @@ mod tests {
 
     #[test]
     fn classifies_alignment_and_provenance_categories() {
-        let alignment = "error: Undefined Behavior: accessing memory based on pointer with alignment 1";
+        let alignment =
+            "error: Undefined Behavior: accessing memory based on pointer with alignment 1";
         let provenance = "error: Undefined Behavior: trying to retag from <908696> for SharedReadOnly permission";
 
         let (_, alignment_category, _, _) = extract_ub(alignment);
         let (_, provenance_category, _, _) = extract_ub(provenance);
-
         assert_eq!(alignment_category, Some(MiriUbCategory::Alignment));
         assert_eq!(
             classify_ub_category("stacked borrow violation"),
@@ -321,5 +336,12 @@ mod tests {
             classify_verdict(&run(false, true), Some(&run(false, false))),
             MiriVerdict::Inconclusive
         );
+    }
+
+    #[test]
+    fn defaults_invocation_when_no_args_are_provided() {
+        let invocation = invocation(Path::new("/crate"), None, &[]);
+        assert_eq!(invocation.working_dir, PathBuf::from("/crate"));
+        assert_eq!(invocation.args, vec!["miri", "test"]);
     }
 }

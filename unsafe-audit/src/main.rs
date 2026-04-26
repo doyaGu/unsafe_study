@@ -1,391 +1,75 @@
-//! unsafe-audit: Collect several kinds of evidence about `unsafe` code in a Rust crate.
-//!
-//! Phases:
-//!   1. Geiger    — syntactic proxy for unsafe surface area
-//!   2. Miri      — UB signals on exercised test paths
-//!   3. Fuzz      — visible failures under existing harnesses
-//!   4. Patterns  — AST-shaped finding extraction and heuristic classification
-//!   5. Report    — Markdown + JSON
-//!
-//! Usage:
-//!   unsafe-audit <crate-dir>                     # audit one crate
-//!   unsafe-audit <dir> --batch                   # audit all subdirs with Cargo.toml
-//!   unsafe-audit <crate-dir> --skip-miri         # skip a phase
-
-mod analyzer;
-mod fuzz;
-mod geiger;
-mod miri;
-mod models;
-mod report_gen;
+mod audit_cli;
+mod cli;
+mod console;
+mod coverage_cli;
+#[cfg(test)]
+mod main_tests;
+mod study_cli;
 
 use anyhow::{bail, Result};
 use clap::Parser;
 use colored::*;
-use std::path::{Path, PathBuf};
+use std::ffi::OsString;
 
-const BASELINE_MIRI_FLAGS: &str = "-Zmiri-strict-provenance";
-
-#[derive(Parser, Debug)]
-#[command(
-    name = "unsafe-audit",
-    bin_name = "unsafe-audit",
-    about = "Collect multi-phase evidence about unsafe code: Geiger + Miri + Fuzz + Pattern Analysis",
-    version
-)]
-struct Cli {
-    /// Path to a crate directory, or a directory of crates (with --batch).
-    #[arg(value_name = "PATH", default_value = ".")]
-    path: PathBuf,
-
-    /// Treat PATH as a directory containing multiple crate subdirectories.
-    #[arg(long)]
-    batch: bool,
-
-    /// Skip Phase 1 (Geiger).
-    #[arg(long)]
-    skip_geiger: bool,
-
-    /// Skip Phase 2 (Miri).
-    #[arg(long)]
-    skip_miri: bool,
-
-    /// Skip Phase 3 (Fuzz).
-    #[arg(long)]
-    skip_fuzz: bool,
-
-    /// Skip Phase 4 (Pattern analysis).
-    #[arg(long)]
-    skip_patterns: bool,
-
-    /// Extra flags for MIRIFLAGS.
-    #[arg(
-        long,
-        default_value = "-Zmiri-symbolic-alignment-check -Zmiri-strict-provenance"
-    )]
-    miri_flags: String,
-
-    /// Re-run Miri with baseline flags when strict Miri reports UB.
-    #[arg(long)]
-    miri_triage: bool,
-
-    /// Fuzz duration per target in seconds.
-    #[arg(long, default_value = "60")]
-    fuzz_time: u64,
-
-    /// Extra env var for fuzz (KEY=VALUE, can repeat).
-    #[arg(long = "fuzz-env", value_name = "KEY=VALUE")]
-    fuzz_env: Vec<String>,
-
-    /// Output directory for reports and logs.
-    #[arg(long)]
-    output: Option<PathBuf>,
-
-    /// Output format: json, markdown, both.
-    #[arg(long, default_value = "both")]
-    format: String,
-
-    /// List discovered crates without running.
-    #[arg(long)]
-    list: bool,
-
-    /// Verbose output.
-    #[arg(short, long)]
-    verbose: bool,
-}
+use audit_cli::run_audit_mode;
+use cli::Cli;
+use coverage_cli::prepare_coverage_json;
+use study_cli::{detach_study_run, detached_child_args, print_study_status, run_study_mode};
+use unsafe_audit::stop_study_run;
 
 fn main() -> Result<()> {
+    let raw_args: Vec<OsString> = std::env::args_os().collect();
     let args: Vec<String> = std::env::args().collect();
     let cli = if args.len() > 1 && args[1] == "unsafe-audit" {
         Cli::parse_from(args.iter().skip(1))
     } else {
         Cli::parse()
     };
-
-    let path = std::env::current_dir()?.join(&cli.path);
-
-    // Parse fuzz env pairs
-    let fuzz_env: Vec<(String, String)> = cli
-        .fuzz_env
-        .iter()
-        .filter_map(|s| {
-            s.split_once('=')
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-        })
-        .collect();
-
-    // Discover crates
-    let crates = discover_crates(&path, cli.batch)?;
-    if crates.is_empty() {
-        bail!("No crates found at {}", path.display());
-    }
-
-    println!();
-    println!(
-        "  {} {} crate(s)",
-        "unsafe-audit:".bold().cyan(),
-        crates.len().to_string().green(),
-    );
-    for c in &crates {
-        println!("    {} {}", "·".dimmed(), c.name.bold());
-    }
-    println!();
-
-    if cli.list {
-        return Ok(());
-    }
-
-    // Output directory
-    let output_dir = cli
-        .output
-        .clone()
-        .unwrap_or_else(|| path.join("unsafe-audit-report"));
-    let miri_log_dir = output_dir.join("miri_logs");
-    let fuzz_log_dir = output_dir.join("fuzz_logs");
-    std::fs::create_dir_all(&output_dir)?;
-    std::fs::create_dir_all(&miri_log_dir)?;
-    std::fs::create_dir_all(&fuzz_log_dir)?;
-
-    let mut results = Vec::new();
-
-    for target in &crates {
-        println!("{}", format!("━━ {} ━━", target.name).bold().cyan());
-        results.push(audit_crate(
-            target,
-            &cli,
-            &fuzz_env,
-            &miri_log_dir,
-            &fuzz_log_dir,
-        ));
-        println!();
-    }
-
-    // Report
-    phase("Report");
-    let report = models::StudyReport {
-        timestamp: chrono::Local::now().to_rfc3339(),
-        crates: results,
-    };
-
-    if cli.format == "json" || cli.format == "both" {
-        let p = output_dir.join("report.json");
-        std::fs::write(&p, report_gen::generate_json(&report)?)?;
-        println!("  {} {}", "·".green(), p.display());
-    }
-    if cli.format == "markdown" || cli.format == "both" {
-        let p = output_dir.join("report.md");
-        std::fs::write(&p, report_gen::generate_markdown(&report))?;
-        println!("  {} {}", "·".green(), p.display());
-    }
-
-    println!();
-    println!(
-        "  {} ({})",
-        "Done.".bold().green(),
-        format!("{} crates", report.crates.len()).dimmed(),
-    );
-    Ok(())
-}
-
-// =========================================================================
-// Discovery
-// =========================================================================
-
-fn discover_crates(path: &Path, batch: bool) -> Result<Vec<models::CrateTarget>> {
-    if path.join("Cargo.toml").exists() && !batch {
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or("unknown".into());
-        return Ok(vec![models::CrateTarget {
-            name,
-            dir: path.to_path_buf(),
-        }]);
-    }
-
-    let mut crates = Vec::new();
-    for entry in std::fs::read_dir(path)? {
-        let sub = entry?.path();
-        if sub.join("Cargo.toml").exists() {
-            let name = sub
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or("unknown".into());
-            crates.push(models::CrateTarget { name, dir: sub });
+    let input_path = std::env::current_dir()?.join(&cli.path);
+    if cli.status || cli.stop {
+        if !input_path.is_file() {
+            bail!("--status/--stop are only supported when PATH is a study manifest file");
         }
-    }
-    crates.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(crates)
-}
-
-// =========================================================================
-// Per-crate audit
-// =========================================================================
-
-fn audit_crate(
-    target: &models::CrateTarget,
-    cli: &Cli,
-    fuzz_env: &[(String, String)],
-    miri_log_dir: &Path,
-    fuzz_log_dir: &Path,
-) -> models::CrateAuditResult {
-    let mut result = models::CrateAuditResult {
-        target: target.clone(),
-        geiger: None,
-        miri: None,
-        fuzz: vec![],
-        pattern_analysis: None,
-    };
-
-    // Phase 1
-    if !cli.skip_geiger {
-        phase("Phase 1: Geiger");
-        match geiger::run_geiger(&target.dir) {
-            Ok(g) => {
+        if cli.status && cli.stop {
+            bail!("--status and --stop cannot be used together");
+        }
+        if cli.stop {
+            let stopped = stop_study_run(&input_path, cli.output.as_deref())?;
+            if stopped {
                 println!(
-                    "  {} {} unsafe exprs ({} unused), forbids={}",
-                    "·".green(),
-                    g.used.exprs.unsafe_.to_string().yellow(),
-                    g.unused.exprs.unsafe_.to_string().dimmed(),
-                    g.forbids_unsafe,
+                    "  {} {}",
+                    "Stop signal sent.".bold().green(),
+                    input_path.display()
                 );
-                result.geiger = Some(g);
-            }
-            Err(e) => println!("  {} {}", "✗".red(), e.to_string().dimmed()),
-        }
-    }
-
-    // Phase 2
-    if !cli.skip_miri {
-        phase("Phase 2: Miri");
-        let strict_log_path = if cli.miri_triage {
-            miri_log_dir.join(format!("{}.strict.log", target.name))
-        } else {
-            miri_log_dir.join(format!("{}.log", target.name))
-        };
-        let baseline_log_path = miri_log_dir.join(format!("{}.baseline.log", target.name));
-        let miri_result = if cli.miri_triage {
-            miri::run_miri_with_triage(
-                &target.dir,
-                &cli.miri_flags,
-                BASELINE_MIRI_FLAGS,
-                &strict_log_path,
-                &baseline_log_path,
-            )
-        } else {
-            miri::run_miri(&target.dir, &cli.miri_flags, &strict_log_path)
-        };
-        match miri_result {
-            Ok(m) => {
-                let status = match m.verdict {
-                    models::MiriVerdict::Clean => "CLEAN".green(),
-                    models::MiriVerdict::TruePositiveUb => "TRUE UB".red().bold(),
-                    models::MiriVerdict::StrictOnlySuspectedFalsePositive => {
-                        "STRICT-ONLY FP?".yellow().bold()
-                    }
-                    models::MiriVerdict::FailedNoUb => "FAILED".red(),
-                    models::MiriVerdict::Inconclusive => "INCONCLUSIVE".yellow(),
-                };
-                println!("  {} {} ({:.1}s)", "·".green(), status, m.duration_secs);
-                if m.ub_detected {
-                    if let Some(msg) = &m.ub_message {
-                        println!("    {} {}", "↳".yellow(), msg.red());
-                    }
-                }
-                result.miri = Some(m);
-            }
-            Err(e) => println!("  {} {}", "✗".red(), e.to_string().dimmed()),
-        }
-    }
-
-    // Phase 3
-    if !cli.skip_fuzz {
-        phase(&format!("Phase 3: Fuzz ({}s/target)", cli.fuzz_time));
-        match fuzz::run_fuzz(&target.dir, cli.fuzz_time, fuzz_env, fuzz_log_dir) {
-            Ok(fuzz_results) => {
-                for f in &fuzz_results {
-                    let s = match f.status {
-                        models::FuzzStatus::Clean => "CLEAN".green(),
-                        models::FuzzStatus::Panic => "PANIC".red().bold(),
-                        models::FuzzStatus::Oom => "OOM".red().bold(),
-                        models::FuzzStatus::Timeout => "TIMEOUT".yellow(),
-                        models::FuzzStatus::BuildFailed => "BUILD FAIL".red(),
-                        models::FuzzStatus::NoFuzzDir | models::FuzzStatus::NoTargets => {
-                            format!("{}", f.status).dimmed()
-                        }
-                        models::FuzzStatus::Error => "ERROR".red(),
-                    };
-                    println!(
-                        "  {} {} — {} {}",
-                        "·".green(),
-                        f.target_name.bold(),
-                        s,
-                        f.total_runs
-                            .map(|n| format!("({} runs)", n))
-                            .unwrap_or_default()
-                            .dimmed(),
-                    );
-                    if let Some(p) = &f.artifact_path {
-                        println!(
-                            "    {} {} ({}B)",
-                            "↳".yellow(),
-                            p.display(),
-                            f.reproducer_size_bytes.unwrap_or(0)
-                        );
-                    }
-                }
-                result.fuzz = fuzz_results;
-            }
-            Err(e) => println!("  {} {}", "✗".red(), e.to_string().dimmed()),
-        }
-    }
-
-    // Phase 4
-    if !cli.skip_patterns {
-        phase("Phase 4: Patterns");
-        match analyzer::analyze_crate(&target.dir) {
-            Ok(summary) => {
-                let (score, rating) = (
-                    summary.risk_score,
-                    if summary.risk_score < 20.0 {
-                        "LOW".green()
-                    } else if summary.risk_score < 50.0 {
-                        "MEDIUM".yellow()
-                    } else {
-                        "HIGH".red()
-                    },
-                );
+            } else {
                 println!(
-                    "  {} {} findings, {} files, risk={:.1} ({})",
-                    "·".green(),
-                    summary.total_findings.to_string().yellow(),
-                    summary.files_with_unsafe.to_string().dimmed(),
-                    score,
-                    rating,
+                    "  {} {}",
+                    "No live study process found.".bold().yellow(),
+                    input_path.display()
                 );
-                if cli.verbose && !summary.patterns.is_empty() {
-                    for pc in &summary.patterns {
-                        println!(
-                            "    {} {} ({})",
-                            "·".dimmed(),
-                            format!("{:?}", pc.pattern),
-                            pc.count.to_string().yellow()
-                        );
-                    }
-                }
-                result.pattern_analysis = Some(summary);
             }
-            Err(e) => println!("  {} {}", "✗".red(), e.to_string().dimmed()),
+            return Ok(());
         }
+        return print_study_status(&input_path, cli.output.as_deref());
     }
+    if input_path.is_file() && cli.detach {
+        return detach_study_run(&raw_args, &cli, &input_path);
+    }
+    let miri_coverage_json = prepare_coverage_json(
+        "miri",
+        cli.miri_coverage_json.as_ref(),
+        cli.miri_profraw_dir.as_ref(),
+        &cli.miri_coverage_objects,
+    )?;
+    let fuzz_coverage_json = prepare_coverage_json(
+        "fuzz",
+        cli.fuzz_coverage_json.as_ref(),
+        cli.fuzz_profraw_dir.as_ref(),
+        &cli.fuzz_coverage_objects,
+    )?;
 
-    result
-}
-
-fn phase(name: &str) {
-    println!(
-        "  {} {}",
-        format!("[{}]", "Phase".dimmed()).dimmed(),
-        name.bold()
-    );
+    if input_path.is_file() {
+        return run_study_mode(&cli, &input_path, miri_coverage_json, fuzz_coverage_json);
+    }
+    run_audit_mode(&cli, input_path, miri_coverage_json, fuzz_coverage_json)
 }
