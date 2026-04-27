@@ -10,10 +10,21 @@ pub enum OutputFormat {
     Markdown,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RunProfile {
+    Smoke,
+    Baseline,
+    Full,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunPlan {
     pub name: String,
     pub output_root: PathBuf,
+    pub profile: RunProfile,
+    pub jobs: usize,
+    pub fuzz_jobs: usize,
     pub phases: PhaseSelection,
     pub formats: Vec<OutputFormat>,
     pub dry_run: bool,
@@ -47,6 +58,9 @@ pub struct RunOptions {
     pub output_root: Option<PathBuf>,
     pub crates: Vec<String>,
     pub dry_run: bool,
+    pub profile: RunProfile,
+    pub jobs: usize,
+    pub fuzz_jobs: usize,
     pub phases: PhaseSelection,
     pub miri_triage: bool,
     pub fuzz_time: Option<u64>,
@@ -60,6 +74,9 @@ impl Default for RunOptions {
             output_root: None,
             crates: Vec::new(),
             dry_run: false,
+            profile: RunProfile::Full,
+            jobs: 1,
+            fuzz_jobs: 1,
             phases: PhaseSelection::default(),
             miri_triage: false,
             fuzz_time: None,
@@ -119,11 +136,14 @@ fn load_single_crate_plan(input: &Path, options: RunOptions) -> Result<RunPlan> 
         output_root: options
             .output_root
             .unwrap_or_else(|| PathBuf::from("unsafe-audit-out")),
+        profile: options.profile,
+        jobs: normalize_jobs(options.jobs),
+        fuzz_jobs: normalize_jobs(options.fuzz_jobs),
         phases: options.phases,
         formats: normalized_formats(options.formats),
         dry_run: options.dry_run,
         miri_triage: options.miri_triage,
-        fuzz_time: options.fuzz_time,
+        fuzz_time: apply_profile_time(options.profile, options.fuzz_time),
         fuzz_env: options.fuzz_env,
         crates: vec![CratePlan {
             name,
@@ -142,9 +162,9 @@ fn load_single_crate_plan(input: &Path, options: RunOptions) -> Result<RunPlan> 
                 harness_dir: None,
                 all: true,
                 targets: Vec::new(),
-                time: options.fuzz_time,
+                time: apply_profile_time(options.profile, options.fuzz_time),
                 budget_label: Some("single_crate".into()),
-                env: BTreeMap::new(),
+                env: default_single_crate_fuzz_env(),
             }],
         }],
     })
@@ -169,7 +189,7 @@ fn load_manifest_plan(path: &Path, options: RunOptions) -> Result<RunPlan> {
             .output_root
             .map(|p| resolve_from_root_or_manifest(base, manifest_root, p)))
         .unwrap_or_else(|| PathBuf::from("study-output"));
-    let fuzz_time = options.fuzz_time.or(study.fuzz_time);
+    let fuzz_time = apply_profile_time(options.profile, options.fuzz_time.or(study.fuzz_time));
 
     let selected: Option<std::collections::BTreeSet<_>> = if options.crates.is_empty() {
         None
@@ -218,7 +238,7 @@ fn load_manifest_plan(path: &Path, options: RunOptions) -> Result<RunPlan> {
                             .map(|p| resolve_from_root_or_manifest(base, manifest_root, p)),
                         all: group.all.unwrap_or(false),
                         targets: group.targets,
-                        time: group.time.or(fuzz_time),
+                        time: apply_profile_time(options.profile, group.time.or(fuzz_time)),
                         budget_label: group.budget_label,
                         env,
                     }
@@ -234,6 +254,9 @@ fn load_manifest_plan(path: &Path, options: RunOptions) -> Result<RunPlan> {
     Ok(RunPlan {
         name: study.name.unwrap_or_else(|| "unsafe-study".into()),
         output_root,
+        profile: options.profile,
+        jobs: normalize_jobs(options.jobs),
+        fuzz_jobs: normalize_jobs(options.fuzz_jobs),
         phases: options.phases,
         formats: normalized_formats(options.formats),
         dry_run: options.dry_run,
@@ -249,6 +272,27 @@ fn normalized_formats(formats: Vec<OutputFormat>) -> Vec<OutputFormat> {
         vec![OutputFormat::Json, OutputFormat::Markdown]
     } else {
         formats
+    }
+}
+
+fn normalize_jobs(jobs: usize) -> usize {
+    jobs.max(1)
+}
+
+fn default_single_crate_fuzz_env() -> BTreeMap<String, String> {
+    BTreeMap::from([("ASAN_OPTIONS".into(), "detect_leaks=0".into())])
+}
+
+fn apply_profile_time(profile: RunProfile, time: Option<u64>) -> Option<u64> {
+    let capped = match profile {
+        RunProfile::Smoke => Some(30),
+        RunProfile::Baseline => Some(300),
+        RunProfile::Full => None,
+    };
+    match (time, capped) {
+        (_, None) => time,
+        (Some(time), Some(cap)) => Some(time.min(cap)),
+        (None, Some(cap)) => Some(cap),
     }
 }
 
@@ -363,6 +407,15 @@ mod tests {
         assert_eq!(plan.crates[0].name, "demo");
         assert_eq!(plan.crates[0].miri_cases[0].name, "upstream_full");
         assert!(plan.crates[0].fuzz_groups[0].all);
+        assert_eq!(plan.jobs, 1);
+        assert_eq!(plan.fuzz_jobs, 1);
+        assert_eq!(
+            plan.crates[0].fuzz_groups[0]
+                .env
+                .get("ASAN_OPTIONS")
+                .unwrap(),
+            "detect_leaks=0"
+        );
     }
 
     #[test]
@@ -385,6 +438,48 @@ mod tests {
         .unwrap();
         assert_eq!(plan.crates.len(), 1);
         assert_eq!(plan.crates[0].name, "b");
+    }
+
+    #[test]
+    fn smoke_profile_caps_fuzz_time() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname='demo'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        let plan = load_plan(
+            dir.path(),
+            RunOptions {
+                profile: RunProfile::Smoke,
+                fuzz_time: Some(600),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(plan.fuzz_time, Some(30));
+        assert_eq!(plan.crates[0].fuzz_groups[0].time, Some(30));
+    }
+
+    #[test]
+    fn baseline_profile_caps_manifest_group_times() {
+        let dir = tempdir().unwrap();
+        let manifest = dir.path().join("study.toml");
+        std::fs::write(
+            &manifest,
+            "[study]\nfuzz_time=3600\n[[crate]]\nname='a'\npath='a'\n[[crate.fuzz_group]]\nname='g'\ntargets=['x']\ntime=900\n",
+        )
+        .unwrap();
+        let plan = load_plan(
+            &manifest,
+            RunOptions {
+                profile: RunProfile::Baseline,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(plan.fuzz_time, Some(300));
+        assert_eq!(plan.crates[0].fuzz_groups[0].time, Some(300));
     }
 
     #[test]

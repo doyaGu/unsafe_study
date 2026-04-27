@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
-use unsafe_audit::config::{PhaseSelection, RunOptions};
+use unsafe_audit::config::{PhaseSelection, RunOptions, RunProfile};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -24,6 +24,18 @@ struct Cli {
     /// Print normalized plan without running external tools.
     #[arg(long)]
     dry_run: bool,
+
+    /// Execution profile. Caps fuzz budgets for interactive runs.
+    #[arg(long, value_enum, default_value_t = ProfileArg::Full)]
+    profile: ProfileArg,
+
+    /// Parallelism across crates in a study run.
+    #[arg(long, default_value_t = 1)]
+    jobs: usize,
+
+    /// Parallelism across fuzz targets within one crate/group.
+    #[arg(long, default_value_t = 1)]
+    fuzz_jobs: usize,
 
     #[arg(long)]
     skip_scan: bool,
@@ -60,12 +72,26 @@ enum FormatArg {
     Markdown,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ProfileArg {
+    Smoke,
+    Baseline,
+    Full,
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let options = RunOptions {
         output_root: cli.output,
         crates: cli.crates,
         dry_run: cli.dry_run,
+        profile: match cli.profile {
+            ProfileArg::Smoke => RunProfile::Smoke,
+            ProfileArg::Baseline => RunProfile::Baseline,
+            ProfileArg::Full => RunProfile::Full,
+        },
+        jobs: cli.jobs,
+        fuzz_jobs: cli.fuzz_jobs,
         phases: PhaseSelection {
             scan: !cli.skip_scan,
             geiger: !cli.skip_geiger,

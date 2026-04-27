@@ -1,11 +1,13 @@
 use crate::config::{CratePlan, FuzzGroupPlan, MiriCasePlan};
 use crate::fs;
 use crate::report::{PhaseEvidence, PhaseKind, PhaseReport, PhaseStatus};
-use crate::runner::{excerpt, CommandExecutor, CommandOutput, CommandSpec};
+use crate::runner::{excerpt, format_duration_ms, CommandExecutor, CommandOutput, CommandSpec};
 use anyhow::Result;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
 pub fn run_geiger(
     crate_plan: &CratePlan,
@@ -68,9 +70,15 @@ pub fn run_miri_cases(
 
     let mut reports = Vec::new();
     for case in &cases {
-        reports.push(run_miri_case(
-            crate_plan, case, triage, crate_root, executor,
-        )?);
+        eprintln!("  miri case {}: start ({})", case.name, case.scope);
+        let report = run_miri_case(crate_plan, case, triage, crate_root, executor)?;
+        eprintln!(
+            "  miri case {}: {} ({})",
+            case.name,
+            phase_status_label(report.status),
+            format_duration_ms(report.duration_ms)
+        );
+        reports.push(report);
     }
     Ok(reports)
 }
@@ -165,6 +173,7 @@ fn miri_spec(crate_plan: &CratePlan, case: &MiriCasePlan, strict: bool) -> Comma
 pub fn run_fuzz_groups(
     crate_plan: &CratePlan,
     default_time: Option<u64>,
+    fuzz_jobs: usize,
     default_env: &BTreeMap<String, String>,
     crate_root: &Path,
     executor: &dyn CommandExecutor,
@@ -185,6 +194,7 @@ pub fn run_fuzz_groups(
 
     let mut reports = Vec::new();
     for group in &groups {
+        eprintln!("  fuzz group {}: start", group.name);
         let targets = if group.all {
             discover_fuzz_targets(crate_plan, group, executor)?
         } else {
@@ -194,17 +204,21 @@ pub fn run_fuzz_groups(
             reports.push(no_targets_report(group));
             continue;
         }
-        for target in targets {
-            reports.push(run_fuzz_target(
-                crate_plan,
-                group,
-                &target,
-                default_time,
-                default_env,
-                crate_root,
-                executor,
-            )?);
-        }
+        reports.extend(run_fuzz_targets_parallel(
+            crate_plan,
+            group,
+            &targets,
+            default_time,
+            fuzz_jobs,
+            default_env,
+            crate_root,
+            executor,
+        )?);
+        eprintln!(
+            "  fuzz group {}: done ({} targets)",
+            group.name,
+            targets.len()
+        );
     }
     Ok(reports)
 }
@@ -214,11 +228,12 @@ fn discover_fuzz_targets(
     group: &FuzzGroupPlan,
     executor: &dyn CommandExecutor,
 ) -> Result<Vec<String>> {
+    let harness_root = canonical_harness_dir(crate_plan, group)?;
     let spec = CommandSpec {
         program: "cargo".into(),
         args: vec!["fuzz".into(), "list".into()],
         env: BTreeMap::new(),
-        current_dir: harness_dir(crate_plan, group),
+        current_dir: harness_root,
     };
     let output = executor.run(&spec)?;
     if !output.success {
@@ -234,6 +249,7 @@ fn discover_fuzz_targets(
 }
 
 fn run_fuzz_target(
+    binary: &Path,
     crate_plan: &CratePlan,
     group: &FuzzGroupPlan,
     target: &str,
@@ -243,27 +259,40 @@ fn run_fuzz_target(
     executor: &dyn CommandExecutor,
 ) -> Result<PhaseReport> {
     let time = group.time.or(default_time).unwrap_or(60);
+    eprintln!("    fuzz target {}: run start (budget {}s)", target, time);
     let mut env = default_env.clone();
     env.extend(group.env.clone());
+    let harness_root = canonical_harness_dir(crate_plan, group)?;
+    let corpus = harness_root.join("fuzz").join("corpus").join(target);
+    let artifact_prefix = harness_root.join("fuzz").join("artifacts").join(target);
+    std::fs::create_dir_all(&artifact_prefix)?;
+    let artifact_before = artifact_snapshot(&artifact_prefix);
     let spec = CommandSpec {
-        program: "cargo".into(),
+        program: binary.display().to_string(),
         args: vec![
-            "fuzz".into(),
-            "run".into(),
-            target.into(),
-            "--".into(),
+            format!("-artifact_prefix={}/", artifact_prefix.display()),
             format!("-max_total_time={time}"),
+            corpus.display().to_string(),
         ],
         env,
-        current_dir: harness_dir(crate_plan, group),
+        current_dir: harness_root,
     };
     let output = executor.run(&spec)?;
     let log_name = format!("{}.{}", group.name, target);
     let log_path = fs::phase_log_path(crate_root, "fuzz", &log_name);
     fs::write_log(&log_path, &output.combined_output)?;
     let status = classify_fuzz_status(&output);
-    let artifact = newest_artifact(&spec.current_dir, target);
+    let error_kind = fuzz_error_kind(&output, status);
+    let artifact = artifact_since(&artifact_prefix, &artifact_before);
     let runs = parse_fuzz_runs(&output.combined_output);
+    eprintln!(
+        "    fuzz target {}: {} ({}/{})",
+        target,
+        phase_status_label(status),
+        format_duration_ms(output.duration_ms),
+        budget_label(time)
+    );
+    let summary = fuzz_summary(target, time, status, runs, &output.combined_output);
     Ok(PhaseReport {
         kind: PhaseKind::Fuzz,
         name: log_name,
@@ -271,10 +300,12 @@ fn run_fuzz_target(
         command: command_vec(&spec),
         duration_ms: output.duration_ms,
         log_path: Some(log_path.display().to_string()),
-        summary: format!("target {target}, budget {time}s"),
+        summary,
         evidence: PhaseEvidence::Fuzz {
             target: Some(target.into()),
+            budget_secs: Some(time),
             artifact: artifact.map(|p| p.display().to_string()),
+            error_kind,
             runs,
             excerpt: excerpt(&output.combined_output),
         },
@@ -292,11 +323,114 @@ fn no_targets_report(group: &FuzzGroupPlan) -> PhaseReport {
         summary: "no fuzz targets discovered".into(),
         evidence: PhaseEvidence::Fuzz {
             target: None,
+            budget_secs: None,
             artifact: None,
+            error_kind: None,
             runs: None,
             excerpt: None,
         },
     }
+}
+
+fn run_fuzz_targets_parallel(
+    crate_plan: &CratePlan,
+    group: &FuzzGroupPlan,
+    targets: &[String],
+    default_time: Option<u64>,
+    fuzz_jobs: usize,
+    default_env: &BTreeMap<String, String>,
+    crate_root: &Path,
+    executor: &dyn CommandExecutor,
+) -> Result<Vec<PhaseReport>> {
+    let mut initial = Vec::with_capacity(targets.len());
+    initial.resize_with(targets.len(), || None);
+    let results = Arc::new(Mutex::new(initial));
+    let next = Arc::new(Mutex::new(0usize));
+    let jobs = fuzz_jobs.max(1).min(targets.len());
+    let mut built = Vec::with_capacity(targets.len());
+    for target in targets {
+        eprintln!(
+            "    fuzz target {}: build start (budget {}s)",
+            target,
+            group.time.or(default_time).unwrap_or(60)
+        );
+        let binary = build_fuzz_target(crate_plan, group, target, executor)?;
+        eprintln!("    fuzz target {}: build done", target);
+        built.push(binary);
+    }
+    let built = Arc::new(built);
+    let targets = Arc::new(targets.to_vec());
+    std::thread::scope(|scope| {
+        for _ in 0..jobs {
+            let results = Arc::clone(&results);
+            let next = Arc::clone(&next);
+            let built = Arc::clone(&built);
+            let targets = Arc::clone(&targets);
+            scope.spawn(move || loop {
+                let idx = {
+                    let mut guard = next.lock().unwrap();
+                    if *guard >= targets.len() {
+                        return;
+                    }
+                    let idx = *guard;
+                    *guard += 1;
+                    idx
+                };
+                let report = run_fuzz_target(
+                    &built[idx],
+                    crate_plan,
+                    group,
+                    &targets[idx],
+                    default_time,
+                    default_env,
+                    crate_root,
+                    executor,
+                );
+                results.lock().unwrap()[idx] = Some(report);
+            });
+        }
+    });
+    let mut reports = Vec::with_capacity(targets.len());
+    for result in results.lock().unwrap().iter_mut() {
+        reports.push(result.take().unwrap()?);
+    }
+    Ok(reports)
+}
+
+fn build_fuzz_target(
+    crate_plan: &CratePlan,
+    group: &FuzzGroupPlan,
+    target: &str,
+    executor: &dyn CommandExecutor,
+) -> Result<PathBuf> {
+    let harness_root = canonical_harness_dir(crate_plan, group)?;
+    let spec = CommandSpec {
+        program: "cargo".into(),
+        args: vec!["fuzz".into(), "build".into(), target.into()],
+        env: BTreeMap::new(),
+        current_dir: harness_root.clone(),
+    };
+    let output = executor.run(&spec)?;
+    if !output.success {
+        anyhow::bail!("cargo fuzz build failed for {target}");
+    }
+    locate_fuzz_binary(&harness_root, target)
+}
+
+fn locate_fuzz_binary(harness_root: &Path, target: &str) -> Result<PathBuf> {
+    let target_dir = harness_root.join("fuzz").join("target");
+    for host_dir in std::fs::read_dir(&target_dir)? {
+        let host_dir = host_dir?;
+        let candidate = host_dir.path().join("release").join(target);
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+    }
+    anyhow::bail!(
+        "unable to locate built fuzz binary for {} under {}",
+        target,
+        target_dir.display()
+    )
 }
 
 fn harness_dir(crate_plan: &CratePlan, group: &FuzzGroupPlan) -> PathBuf {
@@ -304,6 +438,10 @@ fn harness_dir(crate_plan: &CratePlan, group: &FuzzGroupPlan) -> PathBuf {
         .harness_dir
         .clone()
         .unwrap_or_else(|| crate_plan.path.clone())
+}
+
+fn canonical_harness_dir(crate_plan: &CratePlan, group: &FuzzGroupPlan) -> Result<PathBuf> {
+    Ok(harness_dir(crate_plan, group).canonicalize()?)
 }
 
 fn command_vec(spec: &CommandSpec) -> Vec<String> {
@@ -390,6 +528,9 @@ fn classify_fuzz_status(output: &CommandOutput) -> PhaseStatus {
     if output.success {
         return PhaseStatus::Clean;
     }
+    if is_lsan_ptrace_error(&output.combined_output) {
+        return PhaseStatus::Error;
+    }
     let lower = output.combined_output.to_ascii_lowercase();
     if lower.contains("panic")
         || lower.contains("crash")
@@ -402,6 +543,58 @@ fn classify_fuzz_status(output: &CommandOutput) -> PhaseStatus {
     } else {
         PhaseStatus::Error
     }
+}
+
+fn fuzz_error_kind(output: &CommandOutput, status: PhaseStatus) -> Option<String> {
+    match status {
+        PhaseStatus::Clean | PhaseStatus::Skipped => None,
+        PhaseStatus::Finding => Some("finding".into()),
+        PhaseStatus::Error if is_lsan_ptrace_error(&output.combined_output) => {
+            Some("environment_error".into())
+        }
+        PhaseStatus::Error => Some("tool_error".into()),
+    }
+}
+
+fn fuzz_summary(
+    target: &str,
+    time: u64,
+    status: PhaseStatus,
+    runs: Option<u64>,
+    output: &str,
+) -> String {
+    let status_text = match status {
+        PhaseStatus::Clean => "clean",
+        PhaseStatus::Finding => "finding",
+        PhaseStatus::Skipped => "skipped",
+        PhaseStatus::Error if is_lsan_ptrace_error(output) => {
+            "environment error: LeakSanitizer unsupported under ptrace"
+        }
+        PhaseStatus::Error => "error",
+    };
+    match runs {
+        Some(runs) => format!("target {target}, budget {time}s, {runs} runs, {status_text}"),
+        None => format!("target {target}, budget {time}s, {status_text}"),
+    }
+}
+
+fn phase_status_label(status: PhaseStatus) -> &'static str {
+    match status {
+        PhaseStatus::Clean => "clean",
+        PhaseStatus::Finding => "finding",
+        PhaseStatus::Skipped => "skipped",
+        PhaseStatus::Error => "error",
+    }
+}
+
+fn budget_label(time: u64) -> String {
+    format!("{time}s")
+}
+
+fn is_lsan_ptrace_error(output: &str) -> bool {
+    let lower = output.to_ascii_lowercase();
+    lower.contains("leaksanitizer has encountered a fatal error")
+        && lower.contains("does not work under ptrace")
 }
 
 fn parse_fuzz_runs(output: &str) -> Option<u64> {
@@ -418,20 +611,57 @@ fn parse_fuzz_runs(output: &str) -> Option<u64> {
             }
         }
     }
+    for line in output.lines() {
+        if let Some(rest) = line.strip_prefix("Done ") {
+            if let Some(value) = rest.split_whitespace().next().and_then(|n| n.parse().ok()) {
+                return Some(value);
+            }
+        }
+    }
     None
 }
 
-fn newest_artifact(harness_root: &Path, target: &str) -> Option<PathBuf> {
-    let dir = harness_root.join("fuzz").join("artifacts").join(target);
+fn artifact_snapshot(dir: &Path) -> BTreeMap<PathBuf, SystemTime> {
+    let mut snapshot = BTreeMap::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return snapshot;
+    };
+    for entry in entries.flatten() {
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        let Ok(modified) = metadata.modified() else {
+            continue;
+        };
+        snapshot.insert(entry.path(), modified);
+    }
+    snapshot
+}
+
+fn artifact_since(dir: &Path, before: &BTreeMap<PathBuf, SystemTime>) -> Option<PathBuf> {
     let mut newest = None;
-    for entry in std::fs::read_dir(dir).ok()? {
-        let entry = entry.ok()?;
-        let modified = entry.metadata().ok()?.modified().ok()?;
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return None;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        let Ok(modified) = metadata.modified() else {
+            continue;
+        };
+        let changed = before
+            .get(&path)
+            .is_none_or(|previous| modified > *previous);
+        if !changed {
+            continue;
+        }
         if newest
             .as_ref()
-            .is_none_or(|(current, _): &(std::time::SystemTime, PathBuf)| modified > *current)
+            .is_none_or(|(current, _): &(SystemTime, PathBuf)| modified > *current)
         {
-            newest = Some((modified, entry.path()));
+            newest = Some((modified, path));
         }
     }
     newest.map(|(_, path)| path)
@@ -441,27 +671,27 @@ fn newest_artifact(harness_root: &Path, target: &str) -> Option<PathBuf> {
 mod tests {
     use super::*;
     use crate::config::{CratePlan, FuzzGroupPlan, MiriCasePlan};
-    use std::cell::RefCell;
+    use std::sync::Mutex;
     use tempfile::tempdir;
 
     struct ScriptedExecutor {
-        outputs: RefCell<Vec<CommandOutput>>,
-        calls: RefCell<Vec<CommandSpec>>,
+        outputs: Mutex<Vec<CommandOutput>>,
+        calls: Mutex<Vec<CommandSpec>>,
     }
 
     impl ScriptedExecutor {
         fn new(outputs: Vec<CommandOutput>) -> Self {
             Self {
-                outputs: RefCell::new(outputs),
-                calls: RefCell::new(Vec::new()),
+                outputs: Mutex::new(outputs),
+                calls: Mutex::new(Vec::new()),
             }
         }
     }
 
     impl CommandExecutor for ScriptedExecutor {
         fn run(&self, spec: &CommandSpec) -> Result<CommandOutput> {
-            self.calls.borrow_mut().push(spec.clone());
-            Ok(self.outputs.borrow_mut().remove(0))
+            self.calls.lock().unwrap().push(spec.clone());
+            Ok(self.outputs.lock().unwrap().remove(0))
         }
     }
 
@@ -482,6 +712,16 @@ mod tests {
             miri_cases: Vec::new(),
             fuzz_groups: Vec::new(),
         }
+    }
+
+    fn create_built_fuzz_binary(root: &Path, target: &str) {
+        let dir = root
+            .join("fuzz")
+            .join("target")
+            .join("host")
+            .join("release");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(target), "bin").unwrap();
     }
 
     #[test]
@@ -510,6 +750,23 @@ mod tests {
             combined_output: "panic occurred".into(),
         };
         assert_eq!(classify_fuzz_status(&output), PhaseStatus::Finding);
+    }
+
+    #[test]
+    fn fuzz_lsan_ptrace_failure_is_error_not_finding() {
+        let output = CommandOutput {
+            success: false,
+            exit_code: Some(1),
+            duration_ms: 1,
+            combined_output:
+                "LeakSanitizer has encountered a fatal error. does not work under ptrace".into(),
+        };
+        assert_eq!(classify_fuzz_status(&output), PhaseStatus::Error);
+        assert!(is_lsan_ptrace_error(&output.combined_output));
+        assert_eq!(
+            fuzz_error_kind(&output, classify_fuzz_status(&output)).as_deref(),
+            Some("environment_error")
+        );
     }
 
     #[test]
@@ -544,8 +801,9 @@ mod tests {
         let phases = run_miri_cases(&plan, true, dir.path(), &executor).unwrap();
         assert_eq!(phases[0].status, PhaseStatus::Finding);
         assert!(phases[0].summary.contains("strict_only_ub"));
-        assert_eq!(executor.calls.borrow().len(), 2);
-        let first = &executor.calls.borrow()[0];
+        assert_eq!(executor.calls.lock().unwrap().len(), 2);
+        let calls = executor.calls.lock().unwrap();
+        let first = &calls[0];
         assert_eq!(first.current_dir, harness);
         assert_eq!(
             first.args,
@@ -564,6 +822,8 @@ mod tests {
     #[test]
     fn fuzz_all_discovers_targets_runs_each_and_parses_runs() {
         let dir = tempdir().unwrap();
+        create_built_fuzz_binary(dir.path(), "parse");
+        create_built_fuzz_binary(dir.path(), "other");
         let mut plan = crate_plan(dir.path().into());
         plan.fuzz_groups.push(FuzzGroupPlan {
             name: "all".into(),
@@ -576,6 +836,8 @@ mod tests {
         });
         let executor = ScriptedExecutor::new(vec![
             output(true, "warning: ignore\nparse\nother\n"),
+            output(true, "built parse"),
+            output(true, "built other"),
             output(true, "#1 runs: 123 cov: 4"),
             output(false, "panic occurred"),
         ]);
@@ -583,6 +845,7 @@ mod tests {
         let phases = run_fuzz_groups(
             &plan,
             Some(9),
+            1,
             &BTreeMap::from([("GLOBAL".into(), "1".into())]),
             dir.path(),
             &executor,
@@ -594,20 +857,94 @@ mod tests {
         assert!(matches!(
             phases[0].evidence,
             PhaseEvidence::Fuzz {
+                budget_secs: Some(3),
                 runs: Some(123),
                 ..
             }
         ));
-        assert!(executor.calls.borrow()[1]
-            .args
-            .contains(&"-max_total_time=3".to_string()));
-        assert_eq!(executor.calls.borrow()[1].env.get("GLOBAL").unwrap(), "1");
-        assert_eq!(executor.calls.borrow()[1].env.get("A").unwrap(), "B");
+        let calls = executor.calls.lock().unwrap();
+        assert_eq!(calls[1].args, vec!["fuzz", "build", "parse"]);
+        assert_eq!(calls[2].args, vec!["fuzz", "build", "other"]);
+        assert!(calls[3].args.contains(&"-max_total_time=3".to_string()));
+        assert_eq!(calls[3].env.get("GLOBAL").unwrap(), "1");
+        assert_eq!(calls[3].env.get("A").unwrap(), "B");
+        assert!(matches!(
+            phases[0].evidence,
+            PhaseEvidence::Fuzz {
+                runs: Some(123),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_fuzz_runs_supports_done_line_format() {
+        assert_eq!(
+            parse_fuzz_runs("Done 19313761 runs in 31 second(s)"),
+            Some(19313761)
+        );
+    }
+
+    #[test]
+    fn fuzz_summary_mentions_environment_error_and_runs() {
+        let summary = fuzz_summary(
+            "parse",
+            30,
+            PhaseStatus::Error,
+            Some(19313761),
+            "LeakSanitizer has encountered a fatal error. does not work under ptrace",
+        );
+        assert!(summary.contains("environment error"));
+        assert!(summary.contains("19313761 runs"));
+    }
+
+    #[test]
+    fn artifact_since_ignores_history_when_no_new_artifact_exists() {
+        let dir = tempdir().unwrap();
+        let artifact_dir = dir.path().join("artifacts");
+        std::fs::create_dir_all(&artifact_dir).unwrap();
+        let stale = artifact_dir.join("crash-old");
+        std::fs::write(&stale, "old").unwrap();
+
+        let before = artifact_snapshot(&artifact_dir);
+        assert_eq!(artifact_since(&artifact_dir, &before), None);
+    }
+
+    #[test]
+    fn artifact_since_returns_new_artifact_from_current_run() {
+        let dir = tempdir().unwrap();
+        let artifact_dir = dir.path().join("artifacts");
+        std::fs::create_dir_all(&artifact_dir).unwrap();
+        std::fs::write(artifact_dir.join("crash-old"), "old").unwrap();
+        let before = artifact_snapshot(&artifact_dir);
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let fresh = artifact_dir.join("crash-new");
+        std::fs::write(&fresh, "new").unwrap();
+
+        assert_eq!(artifact_since(&artifact_dir, &before), Some(fresh));
+    }
+
+    #[test]
+    fn fuzz_tool_failure_is_tagged_as_tool_error() {
+        let output = CommandOutput {
+            success: false,
+            exit_code: Some(1),
+            duration_ms: 1,
+            combined_output: "failed to execute fuzz target".into(),
+        };
+        assert_eq!(classify_fuzz_status(&output), PhaseStatus::Error);
+        assert_eq!(
+            fuzz_error_kind(&output, classify_fuzz_status(&output)).as_deref(),
+            Some("tool_error")
+        );
     }
 
     #[test]
     fn fuzz_all_with_failed_list_becomes_skipped() {
         let dir = tempdir().unwrap();
+        create_built_fuzz_binary(dir.path(), "parse");
+        std::fs::create_dir_all(dir.path().join("fuzz").join("corpus").join("parse")).unwrap();
         let mut plan = crate_plan(dir.path().into());
         plan.fuzz_groups.push(FuzzGroupPlan {
             name: "all".into(),
@@ -619,7 +956,8 @@ mod tests {
             env: BTreeMap::new(),
         });
         let executor = ScriptedExecutor::new(vec![output(false, "cargo fuzz unavailable")]);
-        let phases = run_fuzz_groups(&plan, None, &BTreeMap::new(), dir.path(), &executor).unwrap();
+        let phases =
+            run_fuzz_groups(&plan, None, 1, &BTreeMap::new(), dir.path(), &executor).unwrap();
         assert_eq!(phases[0].status, PhaseStatus::Skipped);
         assert!(phases[0].summary.contains("no fuzz targets"));
     }

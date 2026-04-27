@@ -30,7 +30,7 @@ pub struct CommandOutput {
     pub combined_output: String,
 }
 
-pub trait CommandExecutor {
+pub trait CommandExecutor: Send + Sync {
     fn run(&self, spec: &CommandSpec) -> Result<CommandOutput>;
 }
 
@@ -80,6 +80,19 @@ pub fn excerpt(text: &str) -> Option<String> {
     }
 }
 
+pub fn format_duration_ms(duration_ms: u128) -> String {
+    if duration_ms < 1_000 {
+        format!("{duration_ms}ms")
+    } else if duration_ms < 60_000 {
+        format!("{:.1}s", duration_ms as f64 / 1_000.0)
+    } else {
+        let total_secs = duration_ms / 1_000;
+        let minutes = total_secs / 60;
+        let seconds = total_secs % 60;
+        format!("{minutes}m{seconds:02}s")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,5 +114,12 @@ mod tests {
         let shortened = excerpt(&text).unwrap();
         assert!(shortened.starts_with("..."));
         assert!(shortened.ends_with('─'));
+    }
+
+    #[test]
+    fn format_duration_ms_formats_short_and_long_values() {
+        assert_eq!(format_duration_ms(532), "532ms");
+        assert_eq!(format_duration_ms(1_530), "1.5s");
+        assert_eq!(format_duration_ms(125_000), "2m05s");
     }
 }
