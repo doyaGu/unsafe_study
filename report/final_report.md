@@ -1,5 +1,7 @@
 # Unsafe Study -- Final Case Study Report
 
+> Status note (April 21, 2026): this document is currently a historical writeup. The executable study protocol has since moved to `study/manifest.toml` and native `unsafe-audit <manifest-path>` execution, and the tool/report schema is now `schema_version = 6`. The quantitative claims below should be treated as pre-overhaul results until the full 12-crate rerun is regenerated from the manifest-driven pipeline.
+
 **Author:** (redacted)
 **Date:** 2026-04-05 (last updated)
 **Toolchain:** nightly-2026-02-01 (rustc 1.95.0-nightly, 905b92696 2026-01-31)
@@ -28,136 +30,193 @@ Cross-crate dependency overlap: both serde_json and bstr depend on **memchr 2.8.
 
 ## 2. Methodology
 
-This section formalizes the study protocol. The three-phase pipeline --
-hotspot mining, Miri-based UB detection, and coverage-guided fuzzing -- was
-designed so that each phase contributes a different kind of evidence and
-covers a complementary class of risk.
+This study does not attempt to prove that a crate is safe or unsafe in the
+absolute sense. Instead, it measures how `unsafe` is distributed in a crate,
+how much of that `unsafe` is dynamically exercised, and whether exercised
+`unsafe` sites produce abnormal signals under dynamic analysis. The key
+methodological choice is that the unit of analysis is not the crate, test
+suite, or fuzz target alone, but the **root-crate unsafe site**.
 
-### 2.1 Study Design Overview
+### 2.1 Unsafe-Site-Centered Study Design
 
-| Phase | Tool | Question answered | Evidence produced |
-|-------|------|-------------------|--------------|
-| 1. Hotspot mining | `cargo-geiger` | Where does `unsafe` syntax concentrate? | Syntactic proxy for local `unsafe` surface |
-| 2. Miri testing | `cargo miri test` | Does Miri report UB on existing test paths? | UB signals on executed paths |
-| 3. Fuzzing | `cargo-fuzz` (libFuzzer) | Do novel inputs trigger crashes, panics, or resource exhaustion? | Observable failures under the available harnesses |
+For each crate, we define an **unsafe site universe**. An unsafe site is a
+statically identifiable source-level unit associated with `unsafe` behavior,
+including:
 
-Phase 1 output feeds into Phase 2 (prioritize crates/modules with high
-`unsafe` density) and Phase 3 (target fuzz harnesses at input-facing APIs
-adjacent to `unsafe` hotspots). None of the three phases alone proves a
-crate safe or unsafe; the study relies on their combined evidence.
+- `unsafe` blocks
+- `unsafe fn` declarations
+- `unsafe impl` declarations
+- `extern` items
+- risky unsafe-relevant operations detected by the AST analyzer
 
-### 2.2 Miri Testing Protocol
+Each site is assigned a stable identifier and a source range. This universe
+forms the denominator for all subsequent unsafe-coverage measurements.
 
-To manage the known false-positive risk of `-Zmiri-symbolic-alignment-check`,
-we adopt a **two-pass triage protocol** with explicit classification criteria.
+The study then combines four evidence sources:
 
-**Pass 1 (strict):** Run `cargo miri test` with full flags:
-```
+| Evidence source | Tooling | Question answered | Output role |
+|----------------|---------|-------------------|-------------|
+| Unsafe surface | `cargo geiger` | How much `unsafe` syntax appears in the root crate and dependency set? | Dependency-aware surface metric |
+| Unsafe-site inventory | `unsafe-audit` pattern analyzer | Which root-crate unsafe sites exist, and where are they? | Defines the site-level denominator |
+| Miri | `cargo miri test` plus companion coverage | Which unsafe sites are exercised by the selected test paths, and do they produce UB signals? | Dynamic UB-oriented evidence |
+| Fuzzing | `cargo fuzz` plus companion coverage replay | Which unsafe sites are exercised by existing input-driven harnesses, and do they produce failures? | Dynamic input-driven evidence |
+
+The static denominator therefore comes from the pattern analyzer, not from
+Geiger totals. Geiger remains useful, but only as a surface-area metric.
+
+### 2.2 Static Evidence: Surface vs. Universe
+
+The study deliberately separates two kinds of static evidence:
+
+1. **Geiger surface accounting.**
+   Geiger is used to describe the amount of `unsafe` syntax in the root crate
+   and its dependency set. This is a dependency-aware measure of unsafe
+   surface, not a direct coverage denominator.
+
+2. **Unsafe site universe construction.**
+   The project’s AST analyzer identifies root-crate unsafe sites, classifies
+   them structurally, and records source ranges. This produces the
+   `unsafe_site_universe` used for site-level reach calculations.
+
+This distinction is important. Geiger can report large dependency-level
+unsafe totals, but those totals do not define how many root-crate sites were
+actually exercised by Miri or fuzzing.
+
+### 2.3 Dynamic Evidence and Unsafe Coverage States
+
+Dynamic analysis is interpreted at the unsafe-site level rather than only at
+the run-result level. A Miri or fuzz run does not simply count as “coverage”
+because it executed; instead, it contributes evidence about which unsafe
+sites were reached.
+
+The dynamic layer distinguishes three states:
+
+| State | Meaning |
+|------|---------|
+| `static_universe_only` | Only the static unsafe-site denominator is available; no dynamic mapping was performed, or the requested dynamic phase had no executable target |
+| `triggered_evidence_only` | Dynamic execution ran, but only abnormal dynamic locations (Miri UB locations, fuzz panic/crash locations) could be mapped back to unsafe sites; clean-path reach remains unknown |
+| `computed` | Source coverage was available and executed source ranges were mapped onto unsafe-site source ranges |
+
+This makes the dynamic evidence hierarchy explicit. Trigger-only evidence is
+useful, but weaker than computed unsafe-site reach derived from source
+coverage.
+
+### 2.4 Miri Protocol
+
+Miri is used to obtain UB-oriented evidence on executed test paths. The
+primary run uses:
+
+```text
 MIRIFLAGS="-Zmiri-symbolic-alignment-check -Zmiri-strict-provenance"
 ```
 
-**Pass 2 (baseline):** If Pass 1 reports UB, re-run with only:
-```
+If the strict run reports UB, a baseline rerun is performed with:
+
+```text
 MIRIFLAGS="-Zmiri-strict-provenance"
 ```
 
-**Classification rules:**
+This yields the following interpretation:
 
-| Pass 1 | Pass 2 | Classification | Action |
-|--------|--------|----------------|--------|
-| CLEAN  | --     | No UB observed on exercised paths | Record as clean under this coverage |
-| UB     | UB (same site) | **True positive** | Minimize reproducer, trace to responsible `unsafe` block, draft upstream report |
-| UB     | UB (different site) | **True positive** + re-triage Pass 1 site | Pass 2 site is a true positive; Pass 1 site may still be an FP -- apply code-level audit to both |
-| UB     | CLEAN  | **Suspected false positive** | Perform code-level audit of the flagged site; confirm pointer is numerically aligned before dereference |
-| UB     | CLEAN + code audit confirms alignment | **Confirmed false positive** | Record as FP with audit evidence |
+| Strict run | Baseline run | Interpretation |
+|------------|--------------|----------------|
+| CLEAN | -- | No UB observed on the exercised test paths |
+| UB | UB | Strong UB signal under both configurations |
+| UB | CLEAN | Strict-only signal; requires code-level triage |
+| UB | failed / inconclusive | UB signal not cleanly confirmed or dismissed |
 
-Note: Pass 2 is strictly less sensitive than Pass 1 (fewer flags enabled),
-so Pass 2 cannot surface a UB that Pass 1 missed at the same site. However,
-because Miri aborts at the first UB, Pass 2 may reach a different code path
-that Pass 1 never executed due to early termination.
+Miri coverage is then lifted from run-level evidence to unsafe-site evidence.
+When source coverage is available, the same selected test scope is replayed
+under coverage instrumentation and the executed ranges are mapped onto the
+unsafe-site universe. This produces Miri unsafe reach in addition to raw UB
+signals.
 
-This protocol was applied retroactively to the baseline crates and by design
-to the extension and batch passes.
+### 2.5 Fuzzing Protocol
 
-**Scope limitations by coverage tier** (see Section 2.5).
+Fuzzing is used to obtain input-driven failure evidence under existing fuzz
+harnesses. Each fuzz target is interpreted as a dynamic probe of a public API
+or related input path. The primary fuzz result remains an operational result
+(`CLEAN`, `PANIC`, `OOM`, `TIMEOUT`, `ENVIRONMENT ERROR`, etc.), but the
+coverage question is handled separately.
 
-### 2.3 Fuzz Harness Design Standards
+For unsafe coverage, fuzzing uses a companion replay protocol:
 
-To enable meaningful cross-crate comparison, fuzz harnesses follow these
-design rules:
+1. rebuild the selected fuzz target(s) with coverage instrumentation
+2. replay existing corpus inputs and saved artifact inputs
+3. export source coverage
+4. map executed source ranges onto the unsafe-site universe
 
-1. **One entry point per harness.** Each harness targets a single public API
-   function (e.g., `Request::parse`, `from_slice`). Multi-API harnesses
-   (e.g., `bstr_fuzz_ops`) are acceptable only when the APIs share an input
-   type and are too lightweight to justify separate targets.
-2. **Deterministic execution.** Harnesses must not use randomness, threads,
-   or filesystem access beyond the fuzz input.
-3. **Seed corpus.** Each target gets a hand-crafted seed corpus containing
-   (a) at least one valid input, (b) at least one syntactically invalid input,
-   and (c) boundary-value inputs relevant to the target (e.g., empty input,
-   maximum-length headers, deeply nested structures).
-4. **Finding classification:**
+This replay does **not** redefine the primary fuzz verdict. It only upgrades
+dynamic reach accounting from trigger-only evidence to computed unsafe-site
+reach when sufficient artifacts are available.
 
-   | Signal | Class | Severity |
-   |--------|-------|----------|
-   | SEGV / SIGABRT / ASan report | Memory safety violation | Critical |
-   | Rust panic (unwrap, assert, index OOB) | Logic / robustness bug | Moderate |
-   | libFuzzer OOM / timeout | Resource exhaustion / DoS | Moderate |
-   | Clean exit after budget | No finding under current harness/budget | -- |
+### 2.6 Source-Coverage-Derived Unsafe Reach
 
-### 2.4 Fuzz Budget Allocation
+Computed unsafe coverage is obtained by intersecting executed source ranges
+with unsafe-site source ranges. This yields:
 
-A fixed wall-clock budget per target can produce misleading cross-crate
-comparisons when throughput varies by orders of magnitude (e.g., httparse
-at ~87M runs/300s vs. bstr at ~767K runs/300s). We address this with a
-**two-tier budget**:
+- Miri reach
+- fuzz reach
+- combined reach
+- triggered sites
+- unmapped triggered locations
 
-- **Baseline crates:** 300 seconds per target (exploratory budget).
-  Throughput and edge coverage are recorded to contextualize "no finding"
-  results. A low-throughput target with 0 crashes carries less confidence
-  than a high-throughput target with 0 crashes.
-- **Extension batch:** 3,600 seconds per target (confirmatory budget).
-  The longer budget compensates for more complex parsers and for targets
-  where the first 300 seconds may not reach deep code paths.
+The study therefore reports not only how many unsafe sites exist, but how
+many were dynamically exercised and how many exercised sites produced
+abnormal evidence.
 
-**Interpreting "0 crashes":** We report iteration count and edge coverage
-alongside crash counts so that readers can assess the practical confidence
-of a clean result. A target with 144M runs and 52 edges (e.g.,
-`parse_chunk_size`) is well-saturated; a target with 767K runs and 709
-edges (e.g., `bstr_fuzz_ops`) has meaningful remaining search space.
+This method should be understood as **source-coverage-derived unsafe-site
+reach**. It is materially stronger than raw harness counting, but it is still
+based on source-range overlap rather than runtime semantic instrumentation at
+every unsafe site.
 
-### 2.5 Coverage Tiers
+### 2.7 Coverage Tiers
 
-Not all crates received equal dynamic-analysis depth. To prevent
-misleading aggregation, we label each crate's Miri and fuzz coverage:
+Not all crates received equal dynamic-analysis depth. To prevent misleading
+aggregation, the study retains explicit tier labels:
 
 | Tier | Miri scope | Fuzz scope | Applies to |
 |------|-----------|------------|------------|
-| **Tier 1 (full)** | Upstream crate's complete `cargo test` suite | Dedicated per-API harnesses, 300s+ budget | httparse, serde_json, bstr |
-| **Tier 2 (targeted)** | `extensions_harness` API smoke tests only | Crate-local harness, 3,600s budget | memchr, winnow, toml_parser, simd-json, quick-xml, goblin, toml_edit, pulldown-cmark, roxmltree |
+| **Tier 1 (full)** | Upstream crate’s complete `cargo test` suite | Dedicated per-API harnesses, shorter but broader baseline budgets | httparse, serde_json, bstr |
+| **Tier 2 (targeted)** | `extensions_harness` or targeted smoke/matrix cases | Crate-local harness groups with longer budgets | memchr, winnow, toml_parser, simd-json, quick-xml, goblin, toml_edit, pulldown-cmark, roxmltree |
 
-Tier 2 Miri results carry less weight than Tier 1 because smoke tests
-exercise a narrower slice of code paths than the upstream test suite.
-Tier 2 fuzz results benefit from a longer budget but may still miss paths
-that Tier 1's multi-harness strategy would cover.
+Tier labels describe evidence depth, not a difference in core semantics. In
+both tiers, the denominator is the root-crate unsafe-site universe and the
+dynamic result is interpreted as unsafe-site reach, subject to the available
+coverage depth.
 
-Note: the initial extension pass ran Miri smoke tests only, with no
-fuzzing. Those three crates (`memchr`, `winnow`, `toml_parser`) later
-received full Tier 2 treatment (Miri + 3,600s fuzz) in the unified batch.
-Section 10 contains the definitive results; the early-pass artifacts are
-retained for methodological transparency (see Section 10.1).
+### 2.8 Study Execution Structure
 
-### 2.6 Finding Severity and Reporting
+The executable protocol is manifest-driven. Each crate is analyzed through
+three normalized layers:
 
-Each confirmed finding is characterized along three axes:
+1. `shared/`
+   Geiger + pattern analysis establish the static denominator once per crate.
+2. `miri/<case>/`
+   Each Miri case contributes one explicit scope of dynamic UB evidence.
+3. `fuzz/<group>/`
+   Each fuzz group contributes one explicit scope of input-driven evidence.
 
-1. **Root cause:** memory safety (UB, use-after-free, buffer overflow),
-   logic error (panic, assertion failure), or resource exhaustion (OOM,
-   algorithmic complexity).
-2. **Unsafe relevance:** whether the defect is directly in an `unsafe`
-   block, reachable through `unsafe` code, or entirely in safe Rust.
-3. **Upstream reportability:** whether the finding warrants an upstream
-   issue, a local-only note, or no action.
+At aggregation time, crate-level unsafe coverage is derived by combining the
+shared unsafe-site universe with all case- and group-level dynamic evidence.
+This avoids the methodological error of treating each dynamic run as though
+it independently defined its own static denominator.
+
+### 2.9 Limitations of the Coverage Method
+
+Two limitations remain important:
+
+1. **Computed unsafe coverage is source-range-based.**
+   It represents overlap between executed source ranges and unsafe-site source
+   ranges, not runtime semantic instrumentation of each unsafe site.
+
+2. **Automatic fuzz coverage is replay-based.**
+   It reflects the observed corpus and artifact input set, not the full
+   coverage of the entire fuzz search process.
+
+Despite these limits, the method is substantially more precise than treating
+crate-level test execution, harness execution, or Geiger totals as direct
+coverage proxies for `unsafe`.
 
 ---
 
