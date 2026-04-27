@@ -53,6 +53,12 @@ fn create_built_fuzz_binary(root: &Path, target: &str) {
     std::fs::write(dir.join(target), "bin").unwrap();
 }
 
+fn create_built_standalone_fuzz_binary(root: &Path, target: &str) {
+    let dir = root.join("target").join("host").join("release");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(target), "bin").unwrap();
+}
+
 #[test]
 fn miri_verdict_separates_strict_only() {
     let strict = CommandOutput {
@@ -573,6 +579,55 @@ fn fuzz_run_copies_seed_corpus_from_fuzz_harnesses_store() {
         std::fs::read(crate_dir.join("fuzz/corpus/parse/seed.bin")).unwrap(),
         b"seed"
     );
+}
+
+#[test]
+fn fuzz_harness_group_uses_standalone_package_layout() {
+    let repo = tempdir().unwrap();
+    let crate_dir = repo.path().join("targets").join("demo");
+    std::fs::create_dir_all(crate_dir.join("src")).unwrap();
+    std::fs::write(
+        crate_dir.join("Cargo.toml"),
+        "[package]\nname='demo'\nversion='0.1.0'\n",
+    )
+    .unwrap();
+    std::fs::write(crate_dir.join("src/lib.rs"), "pub fn demo() {}\n").unwrap();
+
+    let harness_dir = repo.path().join("fuzz_harnesses").join("demo");
+    std::fs::create_dir_all(harness_dir.join("fuzz_targets")).unwrap();
+    std::fs::create_dir_all(harness_dir.join("corpus").join("parse")).unwrap();
+    std::fs::write(
+        harness_dir.join("Cargo.toml"),
+        "[package]\nname='demo-fuzz'\nversion='0.1.0'\n\n[[bin]]\nname='parse'\npath='fuzz_targets/parse.rs'\n",
+    )
+    .unwrap();
+    std::fs::write(harness_dir.join("fuzz_targets/parse.rs"), "#![no_main]\n").unwrap();
+    create_built_standalone_fuzz_binary(&harness_dir, "parse");
+    std::fs::write(harness_dir.join("corpus").join("parse").join("seed.bin"), b"seed").unwrap();
+
+    let mut plan = crate_plan(crate_dir.clone());
+    plan.fuzz_groups.push(FuzzGroupPlan {
+        name: "harness_targets".into(),
+        harness_dir: Some(harness_dir.clone()),
+        all: false,
+        targets: vec!["parse".into()],
+        time: Some(3),
+        budget_label: Some("smoke".into()),
+        env: BTreeMap::new(),
+    });
+    let executor = ScriptedExecutor::new(vec![
+        output(true, "built parse"),
+        output(true, "Done 17 runs in 1 second(s)"),
+    ]);
+
+    let phases = run_fuzz_groups(&plan, Some(9), 1, &BTreeMap::new(), repo.path(), &executor).unwrap();
+
+    assert_eq!(phases.len(), 1);
+    assert_eq!(phases[0].status, PhaseStatus::Pass);
+    let calls = executor.calls.lock().unwrap();
+    assert_eq!(calls[0].args, vec!["build", "--release", "--bin", "parse"]);
+    assert_eq!(calls[1].args.last().unwrap(), &harness_dir.join("corpus").join("parse").display().to_string());
+    assert_eq!(std::fs::read(harness_dir.join("corpus").join("parse").join("seed.bin")).unwrap(), b"seed");
 }
 
 #[test]

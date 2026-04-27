@@ -6,8 +6,29 @@ use anyhow::Result;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
+
+static MIRI_EXECUTION_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn miri_execution_lock() -> &'static Mutex<()> {
+    MIRI_EXECUTION_LOCK.get_or_init(|| Mutex::new(()))
+}
+
+#[derive(Debug, Clone)]
+struct FuzzLayout {
+    harness_root: PathBuf,
+    mode: FuzzHarnessMode,
+    target_dir: PathBuf,
+    corpus_root: PathBuf,
+    artifacts_root: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FuzzHarnessMode {
+    CargoFuzz,
+    Standalone,
+}
 
 pub fn run_geiger(
     crate_plan: &CratePlan,
@@ -56,11 +77,18 @@ pub fn run_geiger(
 #[derive(Deserialize)]
 struct CargoManifestProbe {
     package: Option<CargoManifestPackage>,
+    #[serde(default)]
+    bin: Vec<CargoManifestBin>,
     workspace: Option<toml::Value>,
 }
 
 #[derive(Deserialize)]
 struct CargoManifestPackage {
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct CargoManifestBin {
     name: String,
 }
 
@@ -207,6 +235,7 @@ fn run_miri_once(
     strict: bool,
     executor: &dyn CommandExecutor,
 ) -> Result<CommandOutput> {
+    let _guard = miri_execution_lock().lock().unwrap();
     executor.run(&miri_spec(crate_plan, case, strict))
 }
 
@@ -317,8 +346,8 @@ fn discover_fuzz_targets(
     executor: &dyn CommandExecutor,
 ) -> Result<FuzzDiscovery> {
     let default_command = vec!["cargo".into(), "fuzz".into(), "list".into()];
-    let harness_root = match canonical_harness_dir(crate_plan, group) {
-        Ok(path) => path,
+    let layout = match fuzz_layout(crate_plan, group) {
+        Ok(layout) => layout,
         Err(err) => {
             return Ok(FuzzDiscovery {
                 targets: Vec::new(),
@@ -331,11 +360,15 @@ fn discover_fuzz_targets(
             });
         }
     };
+    if layout.mode == FuzzHarnessMode::Standalone {
+        return discover_standalone_fuzz_targets(&layout);
+    }
+    let args = cargo_fuzz_args("list", &layout, None);
     let spec = CommandSpec {
         program: "cargo".into(),
-        args: vec!["fuzz".into(), "list".into()],
+        args,
         env: BTreeMap::new(),
-        current_dir: harness_root,
+        current_dir: layout.harness_root,
     };
     let command = command_vec(&spec);
     let output = match executor.run(&spec) {
@@ -377,6 +410,33 @@ fn discover_fuzz_targets(
     })
 }
 
+fn discover_standalone_fuzz_targets(layout: &FuzzLayout) -> Result<FuzzDiscovery> {
+    let manifest = layout.harness_root.join("Cargo.toml");
+    let probe = cargo_manifest_probe(&manifest).ok_or_else(|| {
+        anyhow::anyhow!(
+            "unable to read standalone harness manifest {}",
+            manifest.display()
+        )
+    })?;
+    let targets: Vec<String> = probe.bin.into_iter().map(|bin| bin.name).collect();
+    let summary = if targets.is_empty() {
+        "no standalone fuzz targets discovered".into()
+    } else {
+        format!("discovered {} standalone fuzz targets", targets.len())
+    };
+    let detail = if targets.is_empty() {
+        String::new()
+    } else {
+        targets.join("\n")
+    };
+    Ok(FuzzDiscovery {
+        targets,
+        command: vec!["cargo".into(), "build".into(), "--release".into(), "--bins".into()],
+        summary,
+        detail,
+    })
+}
+
 fn select_fuzz_targets(
     group: &FuzzGroupPlan,
     discovery: &FuzzDiscovery,
@@ -414,9 +474,9 @@ fn run_fuzz_target(
     eprintln!("    fuzz target {}: run start (budget {}s)", target, time);
     let mut env = default_env.clone();
     env.extend(group.env.clone());
-    let harness_root = canonical_harness_dir(crate_plan, group)?;
-    let corpus = ensure_fuzz_corpus_dir(crate_plan, target, &harness_root)?;
-    let artifact_prefix = harness_root.join("fuzz").join("artifacts").join(target);
+    let layout = fuzz_layout(crate_plan, group)?;
+    let corpus = ensure_fuzz_corpus_dir(crate_plan, target, &layout)?;
+    let artifact_prefix = layout.artifacts_root.join(target);
     std::fs::create_dir_all(&artifact_prefix)?;
     let artifact_before = artifact_snapshot(&artifact_prefix);
     let spec = CommandSpec {
@@ -427,7 +487,7 @@ fn run_fuzz_target(
             corpus.display().to_string(),
         ],
         env,
-        current_dir: harness_root,
+        current_dir: layout.harness_root,
     };
     let output = executor.run(&spec)?;
     let log_name = format!("{}.{}", group.name, target);
@@ -467,9 +527,9 @@ fn run_fuzz_target(
 fn ensure_fuzz_corpus_dir(
     crate_plan: &CratePlan,
     target: &str,
-    harness_root: &Path,
+    layout: &FuzzLayout,
 ) -> Result<PathBuf> {
-    let corpus = harness_root.join("fuzz").join("corpus").join(target);
+    let corpus = layout.corpus_root.join(target);
     std::fs::create_dir_all(&corpus)?;
     if !dir_is_empty(&corpus)? {
         return Ok(corpus);
@@ -799,21 +859,38 @@ fn build_fuzz_target(
     target: &str,
     executor: &dyn CommandExecutor,
 ) -> std::result::Result<PathBuf, FuzzBuildFailure> {
-    let harness_root =
-        canonical_harness_dir(crate_plan, group).map_err(|err| FuzzBuildFailure {
-            command: vec!["cargo".into(), "fuzz".into(), "build".into(), target.into()],
+    let layout = fuzz_layout(crate_plan, group).map_err(|err| {
+        let (program, args) = fuzz_build_command(
+            &FuzzLayout {
+                harness_root: PathBuf::new(),
+                mode: FuzzHarnessMode::CargoFuzz,
+                target_dir: PathBuf::new(),
+                corpus_root: PathBuf::new(),
+                artifacts_root: PathBuf::new(),
+            },
+            target,
+        );
+        FuzzBuildFailure {
+            command: command_vec(&CommandSpec {
+                program,
+                args,
+                env: BTreeMap::new(),
+                current_dir: PathBuf::new(),
+            }),
             detail: format!("unable to resolve harness directory for {target}: {err}"),
-        })?;
+        }
+    })?;
+    let (program, args) = fuzz_build_command(&layout, target);
     let spec = CommandSpec {
-        program: "cargo".into(),
-        args: vec!["fuzz".into(), "build".into(), target.into()],
+        program,
+        args,
         env: BTreeMap::new(),
-        current_dir: harness_root.clone(),
+        current_dir: layout.harness_root.clone(),
     };
     let command = command_vec(&spec);
     let output = executor.run(&spec).map_err(|err| FuzzBuildFailure {
         command: command.clone(),
-        detail: format!("failed to run cargo fuzz build for {target}: {err}"),
+        detail: format!("failed to run fuzz build for {target}: {err}"),
     })?;
     if !output.success {
         return Err(FuzzBuildFailure {
@@ -821,7 +898,7 @@ fn build_fuzz_target(
             detail: output.combined_output,
         });
     }
-    locate_fuzz_binary(&harness_root, target).map_err(|err| FuzzBuildFailure {
+    locate_fuzz_binary(&layout, target).map_err(|err| FuzzBuildFailure {
         command,
         detail: format!("{}\n\n{}", output.combined_output.trim(), err)
             .trim()
@@ -829,8 +906,42 @@ fn build_fuzz_target(
     })
 }
 
-fn locate_fuzz_binary(harness_root: &Path, target: &str) -> Result<PathBuf> {
-    let target_dir = harness_root.join("fuzz").join("target");
+fn fuzz_build_command(layout: &FuzzLayout, target: &str) -> (String, Vec<String>) {
+    match layout.mode {
+        FuzzHarnessMode::CargoFuzz => ("cargo".into(), cargo_fuzz_args("build", layout, Some(target))),
+        FuzzHarnessMode::Standalone => (
+            "cargo".into(),
+            vec![
+                "build".into(),
+                "--release".into(),
+                "--bin".into(),
+                target.into(),
+            ],
+        ),
+    }
+}
+
+fn locate_fuzz_binary(layout: &FuzzLayout, target: &str) -> Result<PathBuf> {
+    if layout.mode == FuzzHarnessMode::Standalone {
+        let candidate = layout.target_dir.join("release").join(target);
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+        if let Ok(host_dirs) = std::fs::read_dir(&layout.target_dir) {
+            for host_dir in host_dirs.flatten() {
+                let candidate = host_dir.path().join("release").join(target);
+                if candidate.is_file() {
+                    return Ok(candidate);
+                }
+            }
+        }
+        anyhow::bail!(
+            "unable to locate built fuzz binary for {} under {}",
+            target,
+            layout.target_dir.display()
+        )
+    }
+    let target_dir = &layout.target_dir;
     for host_dir in std::fs::read_dir(&target_dir)? {
         let host_dir = host_dir?;
         let candidate = host_dir.path().join("release").join(target);
@@ -854,6 +965,57 @@ fn harness_dir(crate_plan: &CratePlan, group: &FuzzGroupPlan) -> PathBuf {
 
 fn canonical_harness_dir(crate_plan: &CratePlan, group: &FuzzGroupPlan) -> Result<PathBuf> {
     Ok(harness_dir(crate_plan, group).canonicalize()?)
+}
+
+fn fuzz_layout(crate_plan: &CratePlan, group: &FuzzGroupPlan) -> Result<FuzzLayout> {
+    let harness_root = canonical_harness_dir(crate_plan, group)?;
+    if is_standalone_fuzz_package(&harness_root) {
+        Ok(FuzzLayout {
+            harness_root: harness_root.clone(),
+            mode: FuzzHarnessMode::Standalone,
+            target_dir: standalone_target_dir(&harness_root),
+            corpus_root: harness_root.join("corpus"),
+            artifacts_root: harness_root.join("artifacts"),
+        })
+    } else {
+        Ok(FuzzLayout {
+            harness_root: harness_root.clone(),
+            mode: FuzzHarnessMode::CargoFuzz,
+            target_dir: harness_root.join("fuzz").join("target"),
+            corpus_root: harness_root.join("fuzz").join("corpus"),
+            artifacts_root: harness_root.join("fuzz").join("artifacts"),
+        })
+    }
+}
+
+fn standalone_target_dir(harness_root: &Path) -> PathBuf {
+    for ancestor in harness_root.ancestors().skip(1) {
+        let manifest = ancestor.join("Cargo.toml");
+        let Some(probe) = cargo_manifest_probe(&manifest) else {
+            continue;
+        };
+        if probe.workspace.is_some() {
+            return ancestor.join("target");
+        }
+    }
+    harness_root.join("target")
+}
+
+fn is_standalone_fuzz_package(harness_root: &Path) -> bool {
+    harness_root.join("Cargo.toml").is_file() && harness_root.join("fuzz_targets").is_dir()
+}
+
+fn cargo_fuzz_args(command: &str, _layout: &FuzzLayout, target: Option<&str>) -> Vec<String> {
+    let mut args = vec!["fuzz".into(), command.into()];
+    if let Some(target) = target {
+        args.push(target.into());
+    }
+    args
+}
+
+fn cargo_manifest_probe(manifest: &Path) -> Option<CargoManifestProbe> {
+    let contents = std::fs::read_to_string(manifest).ok()?;
+    toml::from_str::<CargoManifestProbe>(&contents).ok()
 }
 
 fn command_vec(spec: &CommandSpec) -> Vec<String> {
