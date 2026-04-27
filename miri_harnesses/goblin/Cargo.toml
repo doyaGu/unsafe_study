@@ -1,0 +1,7 @@
+[package]
+name = "miri_harnesses_goblin"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+goblin = { path = "../../targets/goblin" }

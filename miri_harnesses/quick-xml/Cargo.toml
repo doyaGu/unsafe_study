@@ -1,0 +1,7 @@
+[package]
+name = "miri_harnesses_quick_xml"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+quick-xml = { path = "../../targets/quick-xml" }

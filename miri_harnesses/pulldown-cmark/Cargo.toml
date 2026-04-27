@@ -1,0 +1,7 @@
+[package]
+name = "miri_harnesses_pulldown_cmark"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+pulldown-cmark = { path = "../../targets/pulldown-cmark/pulldown-cmark" }

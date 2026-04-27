@@ -1,0 +1,7 @@
+[package]
+name = "miri_harnesses_toml_parser"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+toml_parser = { path = "../../targets/toml_parser", features = ["unsafe"] }

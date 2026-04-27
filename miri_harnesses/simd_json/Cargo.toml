@@ -1,0 +1,7 @@
+[package]
+name = "miri_harnesses_simd_json"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+simd-json = { path = "../../targets/simd-json" }

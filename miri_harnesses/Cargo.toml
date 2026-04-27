@@ -1,17 +1,15 @@
-[package]
-name = "miri_harnesses"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-bstr = { path = "../targets/bstr" }
-memchr = { path = "../targets/memchr" }
-serde_json = { path = "../targets/serde_json" }
-toml_parser = { path = "../targets/toml_parser", features = ["unsafe"] }
-winnow = { path = "../targets/winnow" }
-simd-json = { path = "../targets/simd-json" }
-quick-xml = { path = "../targets/quick-xml" }
-goblin = { path = "../targets/goblin" }
-toml_edit = { path = "../targets/toml_edit" }
-pulldown-cmark = { path = "../targets/pulldown-cmark" }
-roxmltree = { path = "../targets/roxmltree" }
+[workspace]
+members = [
+	"bstr",
+	"goblin",
+	"memchr",
+	"pulldown-cmark",
+	"quick-xml",
+	"roxmltree",
+	"serde_json",
+	"simd_json",
+	"toml_edit",
+	"toml_parser",
+	"winnow",
+]
+resolver = "2"

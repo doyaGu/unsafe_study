@@ -54,7 +54,8 @@ crates.
   added inside `targets/*` repositories. These are maintained separately from
   the crate-local `targets/<crate>/fuzz/` trees that the manifest-driven study
   executes by default.
-- `evidence/fuzz/corpus/`: seed corpora used by fuzz targets.
+- `fuzz_harnesses/<crate>/corpus/<target>/`: canonical checked-in seed corpora
+  used to backfill crate-local fuzz workspaces before a run.
 
 If the question is "what extra execution paths did we add beyond upstream
 tests?", start with this group.
@@ -65,6 +66,8 @@ These directories store the results produced by the study workflow.
 
 - `evidence/geiger/`: static unsafe-surface outputs and annotations.
 - `evidence/miri/`: Miri logs, triage notes, and UB investigation artifacts.
+- `evidence/fuzz/corpus/`: archived historical corpus material retained for
+  provenance; not the canonical runtime seed location.
 - `evidence/fuzz/findings/`: fuzz logs, findings, and reproducer-oriented notes.
 - `study/output/`: per-run study outputs in the current manifest-driven layout.
 
