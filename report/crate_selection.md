@@ -1,5 +1,49 @@
 # Target Crate Selection
 
+## Canonical Study Set And Harness Mapping
+
+The canonical source of truth for the current study set is
+`study/manifest.toml`. The tables below supersede older prose that referred to
+"latest" crate versions or described the intake process without the final
+manifest wiring.
+
+### Selected Crates
+
+| Crate | Version | Cohort | Coverage tier | Domain | Miri harness | Fuzz harness |
+|-------|---------|--------|---------------|--------|--------------|--------------|
+| `httparse` | `1.10.1` | baseline | tier1 | HTTP/1.1 parsing | crate-local `cargo miri test` (`upstream_full`) | crate-local `targets/httparse/fuzz/` with `parse_chunk_size`, `parse_headers`, `parse_request`, `parse_request_multspaces`, `parse_response`, `parse_response_multspaces` |
+| `serde_json` | `1.0.149` | baseline | tier1 | JSON parsing / deserialization | crate-local `upstream_full` plus `extensions_harness/tests/api_smoke.rs` (`serde_json_streams_multiple_values`, `serde_json_handles_escape_and_number_edges`) | crate-local `targets/serde_json/fuzz/`, all targets |
+| `bstr` | `1.12.1` | baseline | tier1 | Byte-string processing | crate-local `upstream_full` plus `extensions_harness/tests/api_smoke.rs` (`bstr_ascii_boundary_offsets`, `bstr_invalid_utf8_search_and_trim`, `bstr_grapheme_iteration_and_reverse_search`) | crate-local `targets/bstr/fuzz/`, all targets |
+| `memchr` | `2.8.0` | extension | tier2 | Byte / substring search | `extensions_harness/tests/api_smoke.rs` (`memchr_handles_unaligned_public_inputs`, `memchr_memmem_handles_edge_needles`) | crate-local `targets/memchr/fuzz/`, all targets |
+| `winnow` | `0.7.14` | extension | tier2 | Parser combinators | `extensions_harness/tests/api_smoke.rs` (`winnow_parses_ascii_and_unicode_boundaries`, `winnow_handles_partial_numeric_and_whitespace_input`, `winnow_parses_nested_delimited_segments`) | crate-local `targets/winnow/fuzz/` with `winnow_parse`, `winnow_partial`, `winnow_pairs` |
+| `toml_parser` | `1.0.9+spec-1.1.0` | extension | tier2 | TOML lexing / parsing | `extensions_harness/tests/api_smoke.rs` (`toml_parser_lexes_and_parses_nested_inputs`, `toml_parser_handles_multiline_strings`, `toml_parser_tracks_invalid_escape_errors`) | crate-local `targets/toml_parser/fuzz/` with `toml_parser_parse`, `toml_parser_decode`, `toml_parser_value` |
+| `simd-json` | `0.17.0` | extension | tier2 | SIMD JSON parsing | `extensions_harness/tests/simd_json_triage.rs` (`simd_json_borrowed_value_parses_object_with_strings`, `simd_json_owned_value_parses_object_with_strings`, `simd_json_tape_exposes_numeric_array`, `simd_json_borrowed_value_handles_unaligned_input_offset`, `simd_json_borrowed_value_parses_number_heavy_document`, `simd_json_owned_value_parses_escape_heavy_strings`) | crate-local `targets/simd-json/fuzz/`, all targets |
+| `quick-xml` | `0.39.2` | extension | tier2 | Streaming XML reader / writer | `extensions_harness/tests/more_crates.rs` (`quick_xml_streams_events`, `quick_xml_handles_attributes_and_namespaces`) | crate-local `targets/quick-xml/fuzz/` with `quick_xml_read`, `quick_xml_attributes`, `quick_xml_ns_read` |
+| `goblin` | `0.10.5` | extension | tier2 | ELF / PE / Mach-O parsing | `extensions_harness/tests/more_crates.rs` (`goblin_parses_minimal_object_bytes`, `goblin_parses_minimal_pe_bytes`) | crate-local `targets/goblin/fuzz/` with `goblin_object_parse`, `goblin_elf_parse`, `goblin_pe_parse`, `goblin_mach_parse` |
+| `toml_edit` | `0.25.4+spec-1.1.0` | extension | tier2 | Format-preserving TOML parse/edit | `extensions_harness/tests/more_crates.rs` (`toml_edit_parses_and_mutates_document`, `toml_edit_roundtrips_nested_mutations`) | crate-local `targets/toml_edit/fuzz/` with `toml_edit_parse`, `toml_edit_mutate`, `toml_edit_roundtrip` |
+| `pulldown-cmark` | `0.13.1` | extension | tier2 | Markdown parsing / rendering | `extensions_harness/tests/more_crates.rs` (`pulldown_cmark_renders_html`, `pulldown_cmark_renders_nested_structures`) | crate-local `targets/pulldown-cmark/fuzz/` with `pulldown_cmark_parse`, `pulldown_cmark_events`, `pulldown_cmark_offsets` |
+| `roxmltree` | `0.21.1` | extension | tier2 | Read-only XML tree parsing | `extensions_harness/tests/more_crates.rs` (`roxmltree_builds_tree`, `roxmltree_handles_namespaces_and_text`) | crate-local `targets/roxmltree/fuzz/` with `roxmltree_parse`, `roxmltree_traverse`, `roxmltree_options` |
+
+### Harness Files
+
+| Harness file | Role | Crates covered |
+|--------------|------|----------------|
+| `targets/<crate>/` | Full upstream Miri suite in the crate's own test tree | `httparse`, `serde_json`, `bstr` |
+| `extensions_harness/tests/api_smoke.rs` | Targeted API-level Miri probes for baseline follow-ups and parser/search extension crates | `serde_json`, `bstr`, `memchr`, `winnow`, `toml_parser` |
+| `extensions_harness/tests/simd_json_triage.rs` | Dedicated `simd-json` Miri triage cases | `simd-json` |
+| `extensions_harness/tests/more_crates.rs` | Targeted Miri probes for the remaining extension crates | `quick-xml`, `goblin`, `toml_edit`, `pulldown-cmark`, `roxmltree` |
+| `targets/<crate>/fuzz/` | Crate-local `cargo-fuzz` workspace used by the fuzz phase | all 12 selected crates |
+
+### Selection Notes
+
+- The study intentionally mixes three baseline crates with nine extension crates.
+- Tier 1 crates keep full upstream Miri coverage and broader baseline fuzz
+  harnesses.
+- Tier 2 crates use explicit `extensions_harness` cases plus crate-local fuzz
+  targets.
+- `simd-json` is the only crate with a dedicated Miri harness file because its
+  triage cases are materially different from the generic `api_smoke` matrix.
+
 ## Selection Criteria
 
 Each target crate must satisfy:
