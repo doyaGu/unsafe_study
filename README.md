@@ -13,9 +13,7 @@ logs to a single output directory.
 
 The canonical study covers **12 crates** spanning HTTP, JSON, byte/string
 search, parser combinators, TOML, XML, Markdown, and binary-object parsing.
-The full protocol is defined in [study/manifest.toml](study/manifest.toml) and
-documented in [study/README.md](study/README.md) and
-[study/FULL_RUN_GUIDE.md](study/FULL_RUN_GUIDE.md).
+The full protocol is defined in [study/manifest.toml](study/manifest.toml).
 
 ---
 
@@ -118,12 +116,12 @@ synthesize harnesses. For each `[[crate.fuzz_group]]`:
 
 Each result records an `error_kind`:
 
-- `clean`              – budget elapsed, no crash, no findings;
-- `finding`            – libFuzzer reported a crash/panic/timeout/OOM and an
+- `clean`              - budget elapsed, no crash, no findings;
+- `finding`            - libFuzzer reported a crash/panic/timeout/OOM and an
   artifact from this run is attached;
-- `tool_error`         – `cargo fuzz` itself failed (build error, missing
+- `tool_error`         - `cargo fuzz` itself failed (build error, missing
   target, etc.);
-- `environment_error`  – sanitizer/runtime refused to start (e.g. ptrace,
+- `environment_error`  - sanitizer/runtime refused to start (e.g. ptrace,
   Address Space Layout sandboxing).
 
 Artifact attribution is **current-run only**: stale `crash-*` files from
@@ -262,20 +260,24 @@ Long runs print explicit progress to stderr. Representative excerpt:
 
 ## Repository layout
 
-```text
-unsafe-audit/        Rust crate – CLI + library implementing the workflow.
-study/               Manifest-driven study protocol (3 manifest variants).
-targets/             Local checkouts of the 12 study crates.
-miri_harnesses/      Per-crate workspaces with targeted Miri integration tests.
-fuzz_harnesses/      Per-crate fuzz harness mirrors + canonical seed corpora.
-evidence/            Archived geiger/miri/fuzz artifacts from prior runs.
-docs/                Proposal, final report, and supporting writeups.
-scripts/             run_all.sh, run_fuzz.sh, make_demo_video.sh, summarize_geiger.py.
-patches/simd-json/   Compile-fix patch required for nightly + simd-json 0.17.0.
-```
+| Path | Role |
+|------|------|
+| [unsafe-audit/](unsafe-audit/) | Rust crate implementing CLI parsing, plan loading, `scan` / `geiger` / `miri` / `fuzz`, and report writing. |
+| [study/](study/) | Canonical study inputs: `manifest.toml`, `manifest.accept.toml`, `manifest.env-rerun.toml`. |
+| [targets/](targets/) | Local checkouts of the 12 crates under study. |
+| [miri_harnesses/](miri_harnesses/) | Per-crate Cargo packages containing targeted Miri integration tests. |
+| [fuzz_harnesses/](fuzz_harnesses/) | Per-crate fuzz harness mirrors plus canonical seed corpora at `corpus/<target>/`. |
+| [evidence/](evidence/) | Archived geiger, miri, and fuzz artifacts from prior runs. |
+| [scripts/](scripts/) | Helper scripts: `run_all.sh`, `run_fuzz.sh`, `make_demo_video.sh`, `summarize_geiger.py`. |
+| [patches/simd-json/](patches/simd-json/) | Local compile-fix patch required for `simd-json 0.17.0` on the pinned nightly toolchain. |
 
-See [WORKSPACE_MAP.md](WORKSPACE_MAP.md) for how to navigate the tree by
-research role rather than by directory name.
+Read the repository in this order when orienting yourself:
+
+1. this README;
+2. [study/manifest.toml](study/manifest.toml);
+3. [unsafe-audit/src/](unsafe-audit/src/), in module order `main -> lib -> config -> runner -> scan -> phases -> report -> fs`;
+4. [miri_harnesses/](miri_harnesses/) or [fuzz_harnesses/](fuzz_harnesses/) for added dynamic coverage;
+5. [evidence/](evidence/) for archived outputs.
 
 ---
 
@@ -302,15 +304,139 @@ applies the simd-json compile-fix patch, and runs the unsafe-audit test suite.
 
 ---
 
-## Documentation map
+## Study manifests
 
-| Read this | When you need to |
-|-----------|------------------|
-| [README.md](README.md) | Get a one-page overview of the tool and pipeline. |
-| [DESIGN.md](DESIGN.md) | Understand architecture, phase semantics, and report interpretation. |
-| [WORKSPACE_MAP.md](WORKSPACE_MAP.md) | Navigate the repository by research role. |
-| [study/README.md](study/README.md) | Learn the manifest schema and how Miri/fuzz cases are wired. |
-| [study/FULL_RUN_GUIDE.md](study/FULL_RUN_GUIDE.md) | Execute the 12-crate study end-to-end. |
-| [REMAINING_TASKS.md](REMAINING_TASKS.md) | See open work and explicit non-goals. |
-| [REFACTOR_PLAN.md](REFACTOR_PLAN.md) | Historical record of the refactor that produced today's code. |
-| [docs/report/final_report.md](docs/report/final_report.md) | Read the case-study writeup of the 12-crate findings. |
+Three manifest variants are kept under [study/](study/):
+
+| File | Purpose |
+|------|---------|
+| [study/manifest.toml](study/manifest.toml) | Canonical 12-crate study with `fuzz_time = 3600` and the full Miri/fuzz wiring. |
+| [study/manifest.accept.toml](study/manifest.accept.toml) | Smaller acceptance-style run for validating the pipeline without committing to the full budget. |
+| [study/manifest.env-rerun.toml](study/manifest.env-rerun.toml) | Re-run variant used when reproducing behavior with different fuzz environment settings. |
+
+Manifest structure:
+
+- `[study]` holds `name`, `output_root`, `fuzz_time`, and `fuzz_env`.
+- Each `[[crate]]` entry defines `name`, `path`, `cohort`, and `coverage_tier`.
+- Nested `[[crate.miri_case]]` entries define one `cargo miri test` invocation.
+- Nested `[[crate.fuzz_group]]` entries define one fuzz target set, either via
+  `all = true` or an explicit `targets = [...]` list.
+
+Fuzz environment merge order is:
+
+1. inherited process environment;
+2. `study.fuzz_env`;
+3. per-group `env`;
+4. CLI `--fuzz-env KEY=VALUE`.
+
+Before launching a fuzz target, the runner backfills an empty
+`targets/<crate>/fuzz/corpus/<target>/` from
+`fuzz_harnesses/<crate>/corpus/<target>/` when canonical seeds exist.
+
+---
+
+## Runbook
+
+### Required preflight
+
+```bash
+rustup show active-toolchain
+cargo geiger --version
+cargo fuzz --help >/dev/null
+cargo miri --help >/dev/null
+cargo test --manifest-path unsafe-audit/Cargo.toml
+```
+
+Expected state:
+
+- active toolchain is `nightly-2026-02-01`;
+- `cargo-geiger`, `cargo-fuzz`, and `cargo miri` are installed;
+- the `unsafe-audit` test suite passes.
+
+### Required local patch for `simd-json`
+
+Before any rerun that touches `targets/simd-json`, apply:
+
+```bash
+cd targets/simd-json
+git apply --check ../../patches/simd-json/0001-fix-nightly-unused-imports.patch
+git apply ../../patches/simd-json/0001-fix-nightly-unused-imports.patch
+```
+
+Reason: `simd-json 0.17.0` uses `#![deny(warnings)]`, and the pinned nightly
+surfaces five `unused_imports` / unused re-export warnings as hard errors.
+
+### Recommended execution order
+
+Dry run the plan first:
+
+```bash
+bash scripts/run_all.sh --dry-run
+```
+
+Then run a smoke pass across all phases and crates:
+
+```bash
+bash scripts/run_all.sh --profile smoke --jobs 4 --fuzz-jobs 4 \
+  --output /tmp/unsafe-study-smoke
+```
+
+Then run the full manifest budgets:
+
+```bash
+bash scripts/run_all.sh --profile full --jobs 4 --fuzz-jobs 4 \
+  --output /tmp/unsafe-study-full
+```
+
+Optional strict-vs-baseline Miri triage:
+
+```bash
+bash scripts/run_all.sh --profile full --jobs 4 --fuzz-jobs 4 \
+  --miri-triage --output /tmp/unsafe-study-full-triage
+```
+
+### Post-run checks
+
+```bash
+jq '.schema_version, (.crates | length)' /tmp/unsafe-study-full/report.json
+
+jq -r '.crates[] | .name as $c | .phases[]
+       | select(.status=="error")
+       | [$c, .kind, .name, .summary] | @tsv' \
+  /tmp/unsafe-study-full/report.json
+
+jq -r '.crates[]
+       | [.name, (.unsafe_sites | length),
+          .pattern_summary.unsafe_blocks,
+          .pattern_summary.ptr_ops,
+          .pattern_summary.transmutes] | @tsv' \
+  /tmp/unsafe-study-full/report.json
+```
+
+---
+
+## Current status and explicit non-goals
+
+Implemented today:
+
+- AST-based unsafe inventory with stable site IDs and a compact pattern taxonomy;
+- `cargo geiger` root/dependency unsafe summary;
+- configured `cargo miri test` cases, including optional strict-vs-baseline triage;
+- existing-target `cargo-fuzz` execution with sequential build / parallel run;
+- current-run-only artifact attribution and explicit fuzz `error_kind` classification;
+- JSON + Markdown reports with per-crate logs.
+
+Still not implemented:
+
+- fuzz reproducer -> Miri replay;
+- automatic harness generation, even for narrow parser-like APIs;
+- seed corpus auto-generation;
+- typed pattern analysis (for example, union-field access detection);
+- crates.io / git auto-acquisition;
+- HTML reporting.
+
+Interpretation boundaries remain strict:
+
+- clean `miri` means no UB was observed on the exercised paths;
+- clean `fuzz` means no failure was observed under the configured harnesses and budget;
+- the tool does not prove soundness, recover invariants, or score exploitability.

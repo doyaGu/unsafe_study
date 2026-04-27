@@ -1,8 +1,7 @@
 # Study Protocol
 
 [study/manifest.toml](manifest.toml) is the canonical manifest for the
-12-crate study. This document is the schema reference; for end-to-end
-execution, follow [FULL_RUN_GUIDE.md](FULL_RUN_GUIDE.md).
+12-crate study. This document is the schema reference.
 
 `unsafe-audit` treats:
 
