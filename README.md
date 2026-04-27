@@ -4,6 +4,10 @@ A research project and CLI tool ([`unsafe-audit`](unsafe-audit/)) that inventori
 
 The canonical study covers **12 crates**; the protocol is defined in [study/manifest.toml](study/manifest.toml).
 
+## AI Use Disclosure
+
+This repository and its study artifacts were developed with AI assistance for tasks such as code drafting, documentation editing, and workflow automation. Final decisions, validation, and interpretation of results remain the responsibility of the human author.
+
 ---
 
 ## Study cohort
