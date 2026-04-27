@@ -45,11 +45,5 @@ pub fn sanitize(name: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sanitize_keeps_paths_file_safe() {
-        assert_eq!(sanitize("a/b:c"), "a_b_c");
-    }
-}
+#[path = "tests/fs_tests.rs"]
+mod tests;
