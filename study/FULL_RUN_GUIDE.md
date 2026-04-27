@@ -1,81 +1,77 @@
 # Full Run Guide
 
-This document describes how to run the current 12-crate study end to end using
-the implementation that exists in this repository today.
+This is the operational runbook for executing the canonical 12-crate study
+end-to-end against the implementation in this repository.
 
-The source of truth is:
+Sources of truth:
 
-- `study/manifest.toml` for crate selection, Miri cases, and fuzz groups
-- `unsafe-audit` for execution behavior and report format
-- `scripts/run_all.sh` for the recommended Linux entrypoint
+- [study/manifest.toml](manifest.toml) — crates, Miri cases, fuzz groups.
+- [unsafe-audit/](../unsafe-audit/) — execution behavior and report format.
+- [scripts/run_all.sh](../scripts/run_all.sh) — recommended Linux entrypoint.
 
-If any older report or note disagrees with this guide, prefer the current
-runner and generated `report.json`.
+If any older note or report disagrees with this guide, prefer the current
+runner and the freshly generated `report.json`.
 
-## Scope
+---
 
-The full pipeline is:
+## What "the full pipeline" means
 
-1. static unsafe inventory (`scan`)
-2. `cargo geiger` (`geiger`)
-3. configured `cargo miri test` cases (`miri`)
-4. existing `cargo-fuzz` targets (`fuzz`)
-5. top-level `report.json` and `report.md`
+Five stages, all driven by one `unsafe-audit` invocation:
 
-The manifest currently covers 12 crates:
+1. `scan`    — AST-based inventory of unsafe sites (cheap, local).
+2. `geiger`  — `cargo geiger --output-format Json`.
+3. `miri`    — every configured `cargo miri test` case.
+4. `fuzz`    — every existing `cargo-fuzz` target in each configured group.
+5. `report`  — top-level `report.json` (`schema_version = 1`) and `report.md`.
 
-- baseline: `httparse`, `serde_json`, `bstr`
-- extension: `memchr`, `winnow`, `toml_parser`, `simd-json`, `quick-xml`, `goblin`, `toml_edit`, `pulldown-cmark`, `roxmltree`
+The 12 crates currently covered:
+
+- **Baseline:** `httparse`, `serde_json`, `bstr`.
+- **Extension:** `memchr`, `winnow`, `toml_parser`, `simd-json`, `quick-xml`,
+  `goblin`, `toml_edit`, `pulldown-cmark`, `roxmltree`.
+
+---
 
 ## Prerequisites
 
 ### Repository state
 
-The study assumes these directories already exist locally:
+These directories must exist locally:
 
-- `targets/<crate>/` for all 12 selected crates
-- `miri_harnesses/`
-- `unsafe-audit/`
+- `targets/<crate>/` for all 12 crates (the [Dockerfile](../Dockerfile) shows
+  the canonical fetch process),
+- [miri_harnesses/](../miri_harnesses/) (per-crate Cargo workspaces),
+- [fuzz_harnesses/](../fuzz_harnesses/) (per-crate harness mirrors + canonical
+  seed corpora),
+- [unsafe-audit/](../unsafe-audit/) (the runner crate).
 
 ### Required local patch for `simd-json`
 
-Before a formal rerun, apply the local compile-fix patch for
-`targets/simd-json`:
+Apply before any rerun that touches `targets/simd-json`:
 
 ```bash
-cd /home/seclab/unsafe_study/targets/simd-json
+cd targets/simd-json
 git apply --check ../../patches/simd-json/0001-fix-nightly-unused-imports.patch
 git apply ../../patches/simd-json/0001-fix-nightly-unused-imports.patch
 ```
 
-Why this is required today:
-
-- the pinned nightly toolchain surfaces five `unused_imports` / unused
-  re-export warnings in `simd-json 0.17.0`
-- the crate has `#![deny(warnings)]`, so those warnings become hard compile
-  errors
-- without this patch, the dedicated `miri_harnesses/simd_json` package cannot
-  build during the study rerun
-
-The patch is intentionally minimal and only fixes the compile break. It does
-not change parser logic or the targeted Miri cases.
+Why: the pinned nightly toolchain promotes 5 `unused_imports` warnings in
+`simd-json 0.17.0` to hard errors because the crate uses
+`#![deny(warnings)]`. Without the patch, the
+[miri_harnesses/simd_json/](../miri_harnesses/simd_json/) package will not
+build during the rerun. The patch is intentionally minimal and does not
+change parser logic.
 
 ### Toolchain
 
-The repository pins:
+Pinned in [rust-toolchain.toml](../rust-toolchain.toml):
 
 ```text
 nightly-2026-02-01
+components: miri, rust-src, rustfmt, clippy
 ```
 
-Required Rust components:
-
-- `miri`
-- `rust-src`
-- `rustfmt`
-- `clippy`
-
-Install them with:
+Install (idempotent):
 
 ```bash
 rustup toolchain install nightly-2026-02-01 \
@@ -84,55 +80,40 @@ rustup toolchain install nightly-2026-02-01 \
 rustup default nightly-2026-02-01
 ```
 
-### Cargo tools
-
-Install:
+### Cargo plugins
 
 ```bash
 cargo install cargo-geiger --locked
-cargo install cargo-fuzz --locked
+cargo install cargo-fuzz   --locked
 ```
 
-### System packages
+### System packages (Linux)
 
-The exact package set depends on the host, but a Linux environment should have
-at least:
+A working libFuzzer-capable toolchain is required:
 
-- `clang` or an equivalent C/C++ toolchain usable by libFuzzer
-- `build-essential`
-- `cmake`
-- `pkg-config`
-- `libssl-dev`
-- `git`
-- `python3` (recommended: `run_all.sh` uses it for binary-path discovery but can fall back to `cargo run`)
-- `jq` for report inspection
+- `clang` (or equivalent), `build-essential`, `cmake`, `pkg-config`,
+- `libssl-dev`, `git`, `python3`, `jq`, `xz-utils`.
 
-The included [Dockerfile](../Dockerfile)
-shows one known-good environment.
+The bundled [Dockerfile](../Dockerfile) is the reference environment.
 
-## Recommended Execution Order
+---
 
-Do not start with a full 12-crate run if the machine or environment has not
-been validated. Use this sequence.
+## Execution order
 
-### Entry point behavior
+Do **not** start with a full 12-crate run on an unvalidated host. Walk
+through the steps below in order.
 
-Use `bash scripts/run_all.sh ...` as the normal Linux entrypoint.
-
-It builds the repo-local `unsafe-audit` crate, resolves the emitted executable
-path from Cargo when possible, and falls back to `cargo run` otherwise. This
-avoids hardcoding a `target/` path while keeping execution pinned to the
-checked-out repository.
-
-If you want the low-level form, replace the wrapper with:
+`run_all.sh` is the normal entrypoint: it builds the repo-local
+`unsafe-audit` crate, resolves the emitted binary path from
+`cargo build --message-format=json-render-diagnostics`, and falls back to
+`cargo run --manifest-path unsafe-audit/Cargo.toml --` if the JSON parse
+fails. The low-level form is:
 
 ```bash
-cargo run --manifest-path unsafe-audit/Cargo.toml -- study/manifest.toml ...
+cargo run --manifest-path unsafe-audit/Cargo.toml -- study/manifest.toml [args]
 ```
 
-### 1. Preflight checks
-
-From the repo root:
+### 1. Preflight
 
 ```bash
 rustup show active-toolchain
@@ -142,188 +123,171 @@ cargo miri --help >/dev/null
 cargo test --manifest-path unsafe-audit/Cargo.toml
 ```
 
-Expected outcome:
+Expected:
 
-- the active toolchain is `nightly-2026-02-01`
-- `unsafe-audit` tests pass
-- `cargo geiger`, `cargo fuzz`, and `cargo miri` are installed
-- `targets/simd-json` has already had the local compile-fix patch applied
+- active toolchain is `nightly-2026-02-01`,
+- the `unsafe-audit` test suite is green,
+- all three cargo plugins respond,
+- `targets/simd-json` already has the compile-fix patch applied.
 
-### 2. Dry run the manifest
+### 2. Dry-run the manifest
 
-This confirms crate selection, Miri case wiring, and fuzz target groups without
-running analysis tools.
+Validates crate selection, Miri-case wiring, and fuzz-group composition
+without invoking any analysis tools.
 
 ```bash
 bash scripts/run_all.sh --dry-run
 ```
 
-Expected outcome:
+Expected in the printed plan:
 
-- 12 crates appear in the plan
-- `serde_json` has its targeted per-crate Miri harness cases under `miri_harnesses/serde_json/`
-- `simd-json` uses `miri_harnesses/simd_json/tests/simd_json_triage.rs`
-- each crate shows at least one fuzz group
+- 12 crates,
+- `serde_json` carries its targeted Miri cases under
+  `miri_harnesses/serde_json/`,
+- `simd-json` uses
+  `miri_harnesses/simd_json/tests/simd_json_triage.rs`,
+- every crate has at least one fuzz group.
 
-### 3. Run a full smoke pass first
+### 3. Smoke pass
 
-This is the minimum end-to-end health check for all phases and all crates.
+The minimum end-to-end health check across all phases and all crates.
 
 ```bash
 bash scripts/run_all.sh \
   --profile smoke \
-  --jobs 4 \
-  --fuzz-jobs 4 \
+  --jobs 4 --fuzz-jobs 4 \
   --output /tmp/unsafe-study-smoke
 ```
 
 Smoke semantics:
 
-- fuzz budgets are capped at `30s`
-- all configured crates still run
-- Miri and Geiger still run normally
+- fuzz budgets capped at 30s,
+- Miri and Geiger run normally.
 
-Use smoke to answer one question only:
+Smoke answers exactly one question:
 
-> Can every configured phase start, execute, and write a report on this machine?
+> Can every configured phase start, execute, and write a report on this
+> machine?
 
-### 4. Run the full study
+### 4. Full study
 
-Once smoke is clean at the infrastructure level, run the study with the full
-manifest budgets.
-
-Wrapper script:
+Once smoke is clean, run the manifest with full budgets.
 
 ```bash
 bash scripts/run_all.sh \
   --profile full \
-  --jobs 4 \
-  --fuzz-jobs 4 \
+  --jobs 4 --fuzz-jobs 4 \
   --output /tmp/unsafe-study-full
 ```
 
-Important details:
+Notes:
 
-- `full` preserves manifest/requested fuzz budgets instead of capping them
-- the manifest currently sets top-level `fuzz_time = 3600`
-- `--jobs` controls parallelism across crates
-- `--fuzz-jobs` controls parallelism across fuzz targets inside one crate
+- `full` preserves the manifest budgets (`fuzz_time = 3600`).
+- `--jobs` parallelizes across crates.
+- `--fuzz-jobs` parallelizes fuzz targets within one crate.
+- Miri is serialized internally regardless of `--jobs`.
 
-### 5. Optional: rerun with Miri triage
+### 5. Optional Miri triage rerun
 
-If you want the runner to automatically perform a baseline Miri rerun after a
-strict UB report, add:
-
-```bash
---miri-triage
-```
-
-Example:
+Re-run baseline Miri after a strict UB report and classify the verdict:
 
 ```bash
 bash scripts/run_all.sh \
-  --profile full \
-  --jobs 4 \
-  --fuzz-jobs 4 \
+  --profile full --jobs 4 --fuzz-jobs 4 \
   --miri-triage \
   --output /tmp/unsafe-study-full-triage
 ```
 
-## Output Layout
+---
 
-A run writes:
+## Output layout
 
 ```text
 <output>/
   report.json
   report.md
-  crates/<crate>/logs/*.log
+  crates/<crate>/logs/
+    geiger.root.log
+    miri.<case>.log
+    fuzz.<group>.<target>.log
 ```
 
 Examples:
 
-- `/tmp/unsafe-study-smoke/report.json`
 - `/tmp/unsafe-study-full/report.md`
 - `/tmp/unsafe-study-full/crates/serde_json/logs/miri.upstream_full.log`
+- `/tmp/unsafe-study-full/crates/httparse/logs/fuzz.existing_parser_targets.parse_request.log`
 
-## Post-Run Validation
+---
 
-### Basic sanity checks
+## Post-run validation
 
-Check the top-level report exists:
-
-```bash
-ls /tmp/unsafe-study-full
-```
-
-Check schema and crate count:
+### Schema and crate count
 
 ```bash
 jq '.schema_version, (.crates | length)' /tmp/unsafe-study-full/report.json
 ```
 
-Expected today:
+Expected: `1` and `12`.
 
-- `schema_version` is `1`
-- crate count is `12`
-
-### Phase status summary
+### Phase status histogram
 
 ```bash
-jq -r '[.crates[].phases[] | .status] | group_by(.) | map({status: .[0], count: length})' \
+jq -r '[.crates[].phases[] | .status]
+       | group_by(.) | map({status: .[0], count: length})' \
   /tmp/unsafe-study-full/report.json
 ```
 
-List any errors:
+### Errors
 
 ```bash
-jq -r '.crates[] | .name as $c | .phases[] |
-  select(.status=="error") |
-  [$c, .kind, .name, .summary] | @tsv' \
+jq -r '.crates[] | .name as $c | .phases[]
+       | select(.status=="error")
+       | [$c, .kind, .name, .summary] | @tsv' \
   /tmp/unsafe-study-full/report.json
 ```
 
-List findings:
+### Findings
 
 ```bash
-jq -r '.crates[] | .name as $c | .phases[] |
-  select(.status=="finding") |
-  [$c, .kind, .name, .summary, (.evidence.verdict // .evidence.error_kind // "-")] | @tsv' \
+jq -r '.crates[] | .name as $c | .phases[]
+       | select(.status=="finding")
+       | [$c, .kind, .name, .summary,
+          (.evidence.verdict // .evidence.error_kind // "-")] | @tsv' \
   /tmp/unsafe-study-full/report.json
 ```
 
-### Fuzz-specific checks
-
-List fuzz statuses and run counts:
+### Fuzz drill-down
 
 ```bash
-jq -r '.crates[] | .name as $c | .phases[] |
-  select(.kind=="fuzz") |
-  [$c, .name, .status, (.evidence.error_kind // "-"), .summary] | @tsv' \
+jq -r '.crates[] | .name as $c | .phases[]
+       | select(.kind=="fuzz")
+       | [$c, .name, .status,
+          (.evidence.error_kind // "-"), .summary] | @tsv' \
   /tmp/unsafe-study-full/report.json
 ```
 
-Watch for:
+Watch for: `status == "error"`, `error_kind == "environment_error"`, missing
+targets, or suspiciously tiny run counts on targets that should be fast.
 
-- `status == "error"`
-- `error_kind == "environment_error"`
-- missing targets
-- suspiciously tiny run counts on targets that should be fast
-
-### Static inventory checks
+### Static inventory
 
 ```bash
-jq -r '.crates[] |
-  [.name, (.unsafe_sites | length), .pattern_summary.unsafe_blocks, .pattern_summary.ptr_ops, .pattern_summary.transmutes] |
-  @tsv' /tmp/unsafe-study-full/report.json
+jq -r '.crates[]
+       | [.name, (.unsafe_sites | length),
+          .pattern_summary.unsafe_blocks,
+          .pattern_summary.ptr_ops,
+          .pattern_summary.transmutes] | @tsv' \
+  /tmp/unsafe-study-full/report.json
 ```
 
-This confirms `scan` actually populated the unsafe-site inventory rather than
-just the dynamic phases.
+This confirms the `scan` phase actually populated each crate's inventory.
 
-## Useful Variants
+---
 
-### Restrict to one or two crates
+## Useful variants
+
+### Restrict to a subset of crates
 
 ```bash
 bash scripts/run_all.sh \
@@ -336,32 +300,46 @@ bash scripts/run_all.sh \
 
 ```bash
 bash scripts/run_all.sh \
-  --skip-scan \
-  --skip-geiger \
-  --skip-miri \
+  --skip-scan --skip-geiger --skip-miri \
   --profile full \
   --output /tmp/unsafe-study-fuzz-only
 ```
 
-### Re-run only Miri on a subset
+### Re-run only Miri (with triage)
 
 ```bash
 bash scripts/run_all.sh \
   --crates serde_json,bstr \
-  --skip-scan \
-  --skip-geiger \
-  --skip-fuzz \
+  --skip-scan --skip-geiger --skip-fuzz \
   --miri-triage \
   --output /tmp/unsafe-study-miri-only
 ```
 
-## Common Failure Modes
+### Acceptance manifest (smaller surface)
+
+```bash
+cargo run --manifest-path unsafe-audit/Cargo.toml -- \
+  study/manifest.accept.toml \
+  --output /tmp/unsafe-study-accept
+```
+
+### Env-rerun manifest (override sanitizer settings)
+
+```bash
+cargo run --manifest-path unsafe-audit/Cargo.toml -- \
+  study/manifest.env-rerun.toml \
+  --crates simd-json \
+  --fuzz-env ASAN_OPTIONS="detect_leaks=0:abort_on_error=1" \
+  --output /tmp/unsafe-study-env-rerun
+```
+
+---
+
+## Common failure modes
 
 ### `cargo geiger` missing
 
-Symptom:
-
-- Geiger phases fail immediately
+Symptom: every Geiger phase fails immediately.
 
 Fix:
 
@@ -369,12 +347,10 @@ Fix:
 cargo install cargo-geiger --locked
 ```
 
-### `cargo fuzz` missing or libFuzzer build failures
+### `cargo fuzz` missing or libFuzzer build fails
 
-Symptom:
-
-- fuzz build never starts
-- fuzz phases return `tool_error`
+Symptom: fuzz never starts, or every fuzz phase reports
+`error_kind = "tool_error"`.
 
 Fix:
 
@@ -382,14 +358,12 @@ Fix:
 cargo install cargo-fuzz --locked
 ```
 
-Also confirm a working native toolchain is available for sanitizer/libFuzzer
-builds.
+Confirm a working clang / native toolchain is available for the libFuzzer
+sanitizer build.
 
 ### `cargo miri` missing
 
-Symptom:
-
-- Miri phases fail immediately
+Symptom: Miri phases fail immediately.
 
 Fix:
 
@@ -397,41 +371,47 @@ Fix:
 rustup component add miri rust-src --toolchain nightly-2026-02-01
 ```
 
-### Environment-specific LeakSanitizer / ptrace failures
+### Sandbox / ptrace failures
 
-Symptom:
+Symptom: fuzz phases report `error_kind = "environment_error"`.
 
-- fuzz phases report `environment_error`
+The runner already injects `ASAN_OPTIONS=detect_leaks=0`. If failures
+persist, switch to a normal Linux host or use the bundled
+[Dockerfile](../Dockerfile) instead of a restricted sandbox.
 
-The runner already uses `ASAN_OPTIONS=detect_leaks=0` in this study manifest.
-If you still see ptrace-related failures, prefer a normal Linux host or the
-provided Docker environment instead of a restricted sandbox.
+### `simd-json` Miri harness fails to build
+
+Symptom: `miri.simd_json_triage` reports `tool_error` with
+`error[E0432]`/`unused_imports` lines.
+
+Fix: apply
+[../patches/simd-json/0001-fix-nightly-unused-imports.patch](../patches/simd-json/0001-fix-nightly-unused-imports.patch)
+to `targets/simd-json` (see Prerequisites).
 
 ### Old historical reports disagree with the new run
 
-This is expected. Use:
+Expected. Authoritative artifacts for any rerun are:
 
-- the current `study/manifest.toml`
-- the current `unsafe-audit` binary
-- the new `report.json`
+- the current [study/manifest.toml](manifest.toml),
+- the current `unsafe-audit` binary,
+- the freshly generated `report.json`.
 
-as the authoritative execution record.
+---
 
-## Recommended Recordkeeping
+## Recordkeeping
 
-For a full rerun, keep:
+For every rerun, archive at minimum:
 
-- the exact command line
-- the output directory path
-- the git commit of this repo
-- any local changes in `targets/`
-- whether `--miri-triage` was enabled
+- the exact command line,
+- the `--output` directory path,
+- the git commit and working-tree status of this repo:
 
-At minimum:
+  ```bash
+  git rev-parse HEAD
+  git status --short
+  ```
 
-```bash
-git rev-parse HEAD
-git status --short
-```
+- any local modifications under `targets/` (notably the `simd-json` patch),
+- whether `--miri-triage` was enabled.
 
-Save that alongside the output directory.
+Save that metadata alongside the output directory so the run is reproducible.
