@@ -54,7 +54,17 @@ pub fn scan_crate(crate_dir: &Path) -> Result<ScanReport> {
 fn scan_file(crate_dir: &Path, path: &Path, report: &mut ScanReport) -> Result<()> {
     let source =
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    let file = syn::parse_file(&source).with_context(|| format!("parsing {}", path.display()))?;
+    let file = match syn::parse_file(&source) {
+        Ok(file) => file,
+        Err(err) => {
+            eprintln!(
+                "warning: skipping unparsable Rust file {}: {}",
+                path.display(),
+                err
+            );
+            return Ok(());
+        }
+    };
     let relative = path
         .strip_prefix(crate_dir)
         .unwrap_or(path)
@@ -312,5 +322,24 @@ extern "C" { fn c(); }
 
         let report = scan_crate(dir.path()).unwrap();
         assert_eq!(report.summary.inline_asm, 1);
+    }
+
+    #[test]
+    fn scan_skips_unparsable_rust_files() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("src")).unwrap();
+        std::fs::create_dir_all(dir.path().join("benchmarks/haystacks/code")).unwrap();
+        std::fs::write(dir.path().join("src/lib.rs"), "pub unsafe fn kept() {}\n").unwrap();
+        std::fs::write(
+            dir.path().join("benchmarks/haystacks/code/bad.rs"),
+            "fn broken([) {}\n",
+        )
+        .unwrap();
+
+        let report = scan_crate(dir.path()).unwrap();
+
+        assert_eq!(report.summary.unsafe_fns, 1);
+        assert_eq!(report.sites.len(), 1);
+        assert_eq!(report.sites[0].file, "src/lib.rs");
     }
 }

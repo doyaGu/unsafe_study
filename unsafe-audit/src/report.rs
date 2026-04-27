@@ -363,8 +363,13 @@ fn phase_cell(phases: &[PhaseReport], kind: PhaseKind) -> String {
         .any(|p| matches!(p.status, PhaseStatus::Error))
     {
         "error".into()
-    } else {
+    } else if relevant
+        .iter()
+        .any(|p| matches!(p.status, PhaseStatus::Clean))
+    {
         "clean".into()
+    } else {
+        "skipped".into()
     }
 }
 
@@ -535,6 +540,41 @@ mod tests {
             }],
         };
         assert!(render_markdown(&report).contains("| demo | 0 | - | finding | - |"));
+    }
+
+    #[test]
+    fn overview_marks_skipped_when_no_phase_ran_cleanly() {
+        let report = Report {
+            schema_version: 1,
+            study_name: "s".into(),
+            execution: test_execution(),
+            crates: vec![CrateReport {
+                name: "demo".into(),
+                path: "demo".into(),
+                cohort: None,
+                unsafe_sites: Vec::new(),
+                pattern_summary: PatternSummary::default(),
+                phases: vec![PhaseReport {
+                    kind: PhaseKind::Fuzz,
+                    name: "fg.parse".into(),
+                    status: PhaseStatus::Skipped,
+                    command: Vec::new(),
+                    duration_ms: 0,
+                    log_path: None,
+                    summary: "skipped".into(),
+                    evidence: PhaseEvidence::Fuzz {
+                        target: Some("parse".into()),
+                        budget_secs: Some(30),
+                        artifact: None,
+                        error_kind: None,
+                        runs: None,
+                        excerpt: None,
+                    },
+                }],
+                review_priority: Vec::new(),
+            }],
+        };
+        assert!(render_markdown(&report).contains("| demo | 0 | - | - | skipped |"));
     }
 
     #[test]

@@ -328,6 +328,7 @@ mod tests {
                     [a, b, ..] if a == "miri" && b == "test" => {
                         "test result: ok. 1 passed; 0 failed"
                     }
+                    [a, b, ..] if a == "fuzz" && b == "list" => "parse",
                     [a, b, ..] if a == "fuzz" && b == "build" => "built",
                     [arg0, ..] if arg0.contains("fuzz/target/host/release/parse") => {
                         "#1 runs: 22 cov: 7"
@@ -352,7 +353,7 @@ mod tests {
         assert!(report.crates[0].pattern_summary.unsafe_fns >= 1);
         assert!(out.path().join("report.json").exists());
         assert!(out.path().join("report.md").exists());
-        assert_eq!(fake.calls.lock().unwrap().len(), 4);
+        assert_eq!(fake.calls.lock().unwrap().len(), 5);
     }
 
     #[test]

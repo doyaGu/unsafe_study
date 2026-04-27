@@ -18,26 +18,30 @@ pub fn run_geiger(
         program: "cargo".into(),
         args: vec!["geiger".into(), "--output-format".into(), "Json".into()],
         env: BTreeMap::new(),
-        current_dir: crate_plan.path.clone(),
+        current_dir: geiger_working_dir(crate_plan),
     };
     let output = executor.run(&spec)?;
     let log_path = fs::phase_log_path(crate_root, "geiger", "root");
     fs::write_log(&log_path, &output.combined_output)?;
     let (root_unsafe, dependency_unsafe) = parse_geiger_counts(&output.combined_output, crate_plan);
+    let status = if output.success {
+        PhaseStatus::Clean
+    } else if is_geiger_tool_failure(&output.combined_output) {
+        PhaseStatus::Skipped
+    } else {
+        PhaseStatus::Error
+    };
     Ok(PhaseReport {
         kind: PhaseKind::Geiger,
         name: "root".into(),
-        status: if output.success {
-            PhaseStatus::Clean
-        } else {
-            PhaseStatus::Error
-        },
+        status,
         command: command_vec(&spec),
         duration_ms: output.duration_ms,
         log_path: Some(log_path.display().to_string()),
         summary: match (root_unsafe, dependency_unsafe) {
             (Some(root), Some(deps)) => format!("root unsafe {root}, dependency unsafe {deps}"),
             (Some(root), None) => format!("root unsafe {root}"),
+            _ if status == PhaseStatus::Skipped => "geiger tool failure, skipped".into(),
             _ if output.success => "geiger completed".into(),
             _ => "geiger failed".into(),
         },
@@ -47,6 +51,71 @@ pub fn run_geiger(
             excerpt: excerpt(&output.combined_output),
         },
     })
+}
+
+#[derive(Deserialize)]
+struct CargoManifestProbe {
+    package: Option<CargoManifestPackage>,
+    workspace: Option<toml::Value>,
+}
+
+#[derive(Deserialize)]
+struct CargoManifestPackage {
+    name: String,
+}
+
+fn geiger_working_dir(crate_plan: &CratePlan) -> PathBuf {
+    let manifest = crate_plan.path.join("Cargo.toml");
+    let Ok(contents) = std::fs::read_to_string(&manifest) else {
+        return crate_plan.path.clone();
+    };
+    let Ok(parsed) = toml::from_str::<CargoManifestProbe>(&contents) else {
+        return crate_plan.path.clone();
+    };
+    if parsed.package.is_some() || parsed.workspace.is_none() {
+        return crate_plan.path.clone();
+    }
+    find_workspace_member_dir(&crate_plan.path, &crate_plan.name)
+        .unwrap_or_else(|| crate_plan.path.clone())
+}
+
+fn find_workspace_member_dir(root: &Path, crate_name: &str) -> Option<PathBuf> {
+    let entries = std::fs::read_dir(root).ok()?;
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let manifest = entry.path().join("Cargo.toml");
+        let Some(package_name) = manifest_package_name(&manifest) else {
+            continue;
+        };
+        if package_names_match(&package_name, crate_name) {
+            return Some(entry.path());
+        }
+    }
+    None
+}
+
+fn manifest_package_name(manifest: &Path) -> Option<String> {
+    let contents = std::fs::read_to_string(manifest).ok()?;
+    let parsed = toml::from_str::<CargoManifestProbe>(&contents).ok()?;
+    parsed.package.map(|package| package.name)
+}
+
+fn package_names_match(actual: &str, expected: &str) -> bool {
+    normalize_package_name(actual) == normalize_package_name(expected)
+}
+
+fn normalize_package_name(name: &str) -> String {
+    name.replace('_', "-")
+}
+
+fn is_geiger_tool_failure(output: &str) -> bool {
+    output.contains("thread 'main'")
+        && output.contains("assertion failed: self.pending_ids.insert(id)")
 }
 
 pub fn run_miri_cases(
@@ -195,15 +264,17 @@ pub fn run_fuzz_groups(
     let mut reports = Vec::new();
     for group in &groups {
         eprintln!("  fuzz group {}: start", group.name);
-        let targets = if group.all {
-            discover_fuzz_targets(crate_plan, group, executor)?
+        let discovered = discover_fuzz_targets(crate_plan, group, executor)?;
+        let (targets, skipped) = if group.all {
+            (discovered.targets.clone(), Vec::new())
         } else {
-            group.targets.clone()
+            select_fuzz_targets(group, &discovered, crate_root)?
         };
         if targets.is_empty() {
-            reports.push(no_targets_report(group));
+            reports.push(no_targets_report(group, &discovered, crate_root)?);
             continue;
         }
+        reports.extend(skipped);
         reports.extend(run_fuzz_targets_parallel(
             crate_plan,
             group,
@@ -223,29 +294,106 @@ pub fn run_fuzz_groups(
     Ok(reports)
 }
 
+struct FuzzDiscovery {
+    targets: Vec<String>,
+    command: Vec<String>,
+    summary: String,
+    detail: String,
+}
+
+#[derive(Debug, Clone)]
+struct FuzzBuildFailure {
+    command: Vec<String>,
+    detail: String,
+}
+
 fn discover_fuzz_targets(
     crate_plan: &CratePlan,
     group: &FuzzGroupPlan,
     executor: &dyn CommandExecutor,
-) -> Result<Vec<String>> {
-    let harness_root = canonical_harness_dir(crate_plan, group)?;
+) -> Result<FuzzDiscovery> {
+    let default_command = vec!["cargo".into(), "fuzz".into(), "list".into()];
+    let harness_root = match canonical_harness_dir(crate_plan, group) {
+        Ok(path) => path,
+        Err(err) => {
+            return Ok(FuzzDiscovery {
+                targets: Vec::new(),
+                command: default_command,
+                summary: "fuzz workspace missing or harness dir unresolved".into(),
+                detail: format!(
+                    "unable to resolve harness directory for fuzz group {}: {}",
+                    group.name, err
+                ),
+            });
+        }
+    };
     let spec = CommandSpec {
         program: "cargo".into(),
         args: vec!["fuzz".into(), "list".into()],
         env: BTreeMap::new(),
         current_dir: harness_root,
     };
-    let output = executor.run(&spec)?;
+    let command = command_vec(&spec);
+    let output = match executor.run(&spec) {
+        Ok(output) => output,
+        Err(err) => {
+            return Ok(FuzzDiscovery {
+                targets: Vec::new(),
+                command,
+                summary: "cargo fuzz list failed".into(),
+                detail: format!("failed to run cargo fuzz list: {err}"),
+            });
+        }
+    };
     if !output.success {
-        return Ok(Vec::new());
+        return Ok(FuzzDiscovery {
+            targets: Vec::new(),
+            command,
+            summary: "cargo fuzz list failed".into(),
+            detail: output.combined_output,
+        });
     }
-    Ok(output
+    let targets: Vec<String> = output
         .combined_output
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty() && !line.starts_with("warning:"))
         .map(str::to_string)
-        .collect())
+        .collect();
+    let summary = if targets.is_empty() {
+        "no fuzz targets discovered".into()
+    } else {
+        format!("discovered {} fuzz targets", targets.len())
+    };
+    Ok(FuzzDiscovery {
+        targets,
+        command,
+        summary,
+        detail: output.combined_output,
+    })
+}
+
+fn select_fuzz_targets(
+    group: &FuzzGroupPlan,
+    discovery: &FuzzDiscovery,
+    crate_root: &Path,
+) -> Result<(Vec<String>, Vec<PhaseReport>)> {
+    let discovered = &discovery.targets;
+    let discovered: std::collections::BTreeSet<_> = discovered.iter().map(String::as_str).collect();
+    let mut available = Vec::new();
+    let mut skipped = Vec::new();
+
+    for target in &group.targets {
+        if discovered.contains(target.as_str()) {
+            available.push(target.clone());
+        } else {
+            skipped.push(missing_fuzz_target_report(
+                group, target, discovery, crate_root,
+            )?);
+        }
+    }
+
+    Ok((available, skipped))
 }
 
 fn run_fuzz_target(
@@ -263,7 +411,7 @@ fn run_fuzz_target(
     let mut env = default_env.clone();
     env.extend(group.env.clone());
     let harness_root = canonical_harness_dir(crate_plan, group)?;
-    let corpus = harness_root.join("fuzz").join("corpus").join(target);
+    let corpus = ensure_fuzz_corpus_dir(crate_plan, target, &harness_root)?;
     let artifact_prefix = harness_root.join("fuzz").join("artifacts").join(target);
     std::fs::create_dir_all(&artifact_prefix)?;
     let artifact_before = artifact_snapshot(&artifact_prefix);
@@ -312,24 +460,165 @@ fn run_fuzz_target(
     })
 }
 
-fn no_targets_report(group: &FuzzGroupPlan) -> PhaseReport {
-    PhaseReport {
+fn ensure_fuzz_corpus_dir(
+    crate_plan: &CratePlan,
+    target: &str,
+    harness_root: &Path,
+) -> Result<PathBuf> {
+    let corpus = harness_root.join("fuzz").join("corpus").join(target);
+    std::fs::create_dir_all(&corpus)?;
+    if !dir_is_empty(&corpus)? {
+        return Ok(corpus);
+    }
+    if let Some(seed_dir) = canonical_seed_corpus_dir(crate_plan, target) {
+        if seed_dir.is_dir() {
+            copy_dir_contents(&seed_dir, &corpus)?;
+        }
+    }
+    Ok(corpus)
+}
+
+fn canonical_seed_corpus_dir(crate_plan: &CratePlan, target: &str) -> Option<PathBuf> {
+    let repo_root = repo_root_from_crate_path(&crate_plan.path)?;
+    Some(
+        repo_root
+            .join("fuzz_harnesses")
+            .join(&crate_plan.name)
+            .join("corpus")
+            .join(target),
+    )
+}
+
+fn repo_root_from_crate_path(crate_path: &Path) -> Option<PathBuf> {
+    let crate_path = crate_path.canonicalize().ok()?;
+    for ancestor in crate_path.ancestors() {
+        if ancestor.join("study").is_dir() && ancestor.join("unsafe-audit").is_dir() {
+            return Some(ancestor.to_path_buf());
+        }
+    }
+    let parent = crate_path.parent()?;
+    if parent.file_name().and_then(|name| name.to_str()) == Some("targets") {
+        return parent.parent().map(Path::to_path_buf);
+    }
+    None
+}
+
+fn dir_is_empty(dir: &Path) -> Result<bool> {
+    Ok(std::fs::read_dir(dir)?.next().transpose()?.is_none())
+}
+
+fn copy_dir_contents(src: &Path, dst: &Path) -> Result<()> {
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            std::fs::create_dir_all(&dst_path)?;
+            copy_dir_contents(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
+}
+
+fn no_targets_report(
+    group: &FuzzGroupPlan,
+    discovery: &FuzzDiscovery,
+    crate_root: &Path,
+) -> Result<PhaseReport> {
+    let root_cause = if discovery.targets.is_empty() {
+        discovery.summary.clone()
+    } else {
+        "configured fuzz targets not present in local workspace".into()
+    };
+    let summary = format!("no fuzz targets available: {root_cause}");
+    let log_name = group.name.clone();
+    let mut log = format!("command: {}\n", discovery.command.join(" "));
+    if !group.all && !group.targets.is_empty() {
+        log.push_str(&format!(
+            "configured targets: {}\n",
+            group.targets.join(", ")
+        ));
+    }
+    if !discovery.targets.is_empty() {
+        log.push_str(&format!(
+            "discovered targets: {}\n",
+            discovery.targets.join(", ")
+        ));
+    }
+    if !discovery.detail.trim().is_empty() {
+        log.push('\n');
+        log.push_str(discovery.detail.trim());
+        log.push('\n');
+    }
+    let log_path = write_phase_note(crate_root, "fuzz", &log_name, &log)?;
+    Ok(PhaseReport {
         kind: PhaseKind::Fuzz,
         name: group.name.clone(),
         status: PhaseStatus::Skipped,
-        command: vec!["cargo".into(), "fuzz".into(), "list".into()],
+        command: discovery.command.clone(),
         duration_ms: 0,
-        log_path: None,
-        summary: "no fuzz targets discovered".into(),
+        log_path: Some(log_path),
+        summary,
         evidence: PhaseEvidence::Fuzz {
             target: None,
             budget_secs: None,
             artifact: None,
             error_kind: None,
             runs: None,
-            excerpt: None,
+            excerpt: excerpt(&log),
         },
+    })
+}
+
+fn missing_fuzz_target_report(
+    group: &FuzzGroupPlan,
+    target: &str,
+    discovery: &FuzzDiscovery,
+    crate_root: &Path,
+) -> Result<PhaseReport> {
+    let name = format!("{}.{}", group.name, target);
+    let mut log = format!(
+        "command: {}\nconfigured target: {}\n",
+        discovery.command.join(" "),
+        target
+    );
+    if !discovery.targets.is_empty() {
+        log.push_str(&format!(
+            "discovered targets: {}\n",
+            discovery.targets.join(", ")
+        ));
     }
+    if !discovery.detail.trim().is_empty() {
+        log.push('\n');
+        log.push_str(discovery.detail.trim());
+        log.push('\n');
+    }
+    let log_path = write_phase_note(crate_root, "fuzz", &name, &log)?;
+    Ok(PhaseReport {
+        kind: PhaseKind::Fuzz,
+        name,
+        status: PhaseStatus::Skipped,
+        command: vec!["cargo".into(), "fuzz".into(), "build".into(), target.into()],
+        duration_ms: 0,
+        log_path: Some(log_path),
+        summary: format!("configured fuzz target {target} not present in local workspace"),
+        evidence: PhaseEvidence::Fuzz {
+            target: Some(target.into()),
+            budget_secs: group.time,
+            artifact: None,
+            error_kind: None,
+            runs: None,
+            excerpt: excerpt(&log),
+        },
+    })
+}
+
+fn write_phase_note(crate_root: &Path, phase: &str, name: &str, content: &str) -> Result<String> {
+    let log_path = fs::phase_log_path(crate_root, phase, name);
+    fs::write_log(&log_path, content)?;
+    Ok(log_path.display().to_string())
 }
 
 fn run_fuzz_targets_parallel(
@@ -342,24 +631,42 @@ fn run_fuzz_targets_parallel(
     crate_root: &Path,
     executor: &dyn CommandExecutor,
 ) -> Result<Vec<PhaseReport>> {
-    let mut initial = Vec::with_capacity(targets.len());
-    initial.resize_with(targets.len(), || None);
-    let results = Arc::new(Mutex::new(initial));
-    let next = Arc::new(Mutex::new(0usize));
-    let jobs = fuzz_jobs.max(1).min(targets.len());
-    let mut built = Vec::with_capacity(targets.len());
+    let mut reports = Vec::new();
+    let mut runnable_targets = Vec::new();
+    let mut built = Vec::new();
     for target in targets {
         eprintln!(
             "    fuzz target {}: build start (budget {}s)",
             target,
             group.time.or(default_time).unwrap_or(60)
         );
-        let binary = build_fuzz_target(crate_plan, group, target, executor)?;
-        eprintln!("    fuzz target {}: build done", target);
-        built.push(binary);
+        match build_fuzz_target(crate_plan, group, target, executor) {
+            Ok(binary) => {
+                eprintln!("    fuzz target {}: build done", target);
+                runnable_targets.push(target.clone());
+                built.push(binary);
+            }
+            Err(err) => {
+                eprintln!("    fuzz target {}: build error ({})", target, err.detail);
+                reports.push(if let Some(path) = missing_fuzz_bin_path(&err.detail) {
+                    missing_fuzz_bin_report(group, target, default_time, crate_root, &err, &path)?
+                } else {
+                    fuzz_build_error_report(group, target, default_time, crate_root, &err)?
+                });
+            }
+        }
     }
+    if runnable_targets.is_empty() {
+        return Ok(reports);
+    }
+
+    let mut initial = Vec::with_capacity(runnable_targets.len());
+    initial.resize_with(runnable_targets.len(), || None);
+    let results = Arc::new(Mutex::new(initial));
+    let next = Arc::new(Mutex::new(0usize));
+    let jobs = fuzz_jobs.max(1).min(runnable_targets.len());
     let built = Arc::new(built);
-    let targets = Arc::new(targets.to_vec());
+    let targets = Arc::new(runnable_targets);
     std::thread::scope(|scope| {
         for _ in 0..jobs {
             let results = Arc::clone(&results);
@@ -390,11 +697,88 @@ fn run_fuzz_targets_parallel(
             });
         }
     });
-    let mut reports = Vec::with_capacity(targets.len());
     for result in results.lock().unwrap().iter_mut() {
         reports.push(result.take().unwrap()?);
     }
     Ok(reports)
+}
+
+fn fuzz_build_error_report(
+    group: &FuzzGroupPlan,
+    target: &str,
+    default_time: Option<u64>,
+    crate_root: &Path,
+    err: &FuzzBuildFailure,
+) -> Result<PhaseReport> {
+    let time = group.time.or(default_time).unwrap_or(60);
+    let name = format!("{}.{}", group.name, target);
+    let detail = if err.detail.trim().is_empty() {
+        format!("cargo fuzz build failed for {target}")
+    } else {
+        err.detail.clone()
+    };
+    let log_path = write_phase_note(crate_root, "fuzz", &name, &detail)?;
+    Ok(PhaseReport {
+        kind: PhaseKind::Fuzz,
+        name,
+        status: PhaseStatus::Error,
+        command: err.command.clone(),
+        duration_ms: 0,
+        log_path: Some(log_path),
+        summary: format!("target {target}, budget {time}s, build error"),
+        evidence: PhaseEvidence::Fuzz {
+            target: Some(target.into()),
+            budget_secs: Some(time),
+            artifact: None,
+            error_kind: Some("tool_error".into()),
+            runs: None,
+            excerpt: excerpt(&detail),
+        },
+    })
+}
+
+fn missing_fuzz_bin_report(
+    group: &FuzzGroupPlan,
+    target: &str,
+    default_time: Option<u64>,
+    crate_root: &Path,
+    err: &FuzzBuildFailure,
+    path: &str,
+) -> Result<PhaseReport> {
+    let time = group.time.or(default_time).unwrap_or(60);
+    let name = format!("{}.{}", group.name, target);
+    let detail = if err.detail.trim().is_empty() {
+        format!("declared fuzz target source is missing for {target}")
+    } else {
+        err.detail.clone()
+    };
+    let log_path = write_phase_note(crate_root, "fuzz", &name, &detail)?;
+    Ok(PhaseReport {
+        kind: PhaseKind::Fuzz,
+        name,
+        status: PhaseStatus::Skipped,
+        command: err.command.clone(),
+        duration_ms: 0,
+        log_path: Some(log_path),
+        summary: format!("target {target}, budget {time}s, declared source missing at {path}"),
+        evidence: PhaseEvidence::Fuzz {
+            target: Some(target.into()),
+            budget_secs: Some(time),
+            artifact: None,
+            error_kind: None,
+            runs: None,
+            excerpt: excerpt(&detail),
+        },
+    })
+}
+
+fn missing_fuzz_bin_path(detail: &str) -> Option<String> {
+    let prefix = "error: can't find bin `";
+    let rest = detail.split_once(prefix)?.1;
+    let (_, after_name) = rest.split_once('`')?;
+    let path_prefix = " at path `";
+    let path = after_name.split_once(path_prefix)?.1.split_once('`')?.0;
+    Some(path.to_string())
 }
 
 fn build_fuzz_target(
@@ -402,19 +786,35 @@ fn build_fuzz_target(
     group: &FuzzGroupPlan,
     target: &str,
     executor: &dyn CommandExecutor,
-) -> Result<PathBuf> {
-    let harness_root = canonical_harness_dir(crate_plan, group)?;
+) -> std::result::Result<PathBuf, FuzzBuildFailure> {
+    let harness_root =
+        canonical_harness_dir(crate_plan, group).map_err(|err| FuzzBuildFailure {
+            command: vec!["cargo".into(), "fuzz".into(), "build".into(), target.into()],
+            detail: format!("unable to resolve harness directory for {target}: {err}"),
+        })?;
     let spec = CommandSpec {
         program: "cargo".into(),
         args: vec!["fuzz".into(), "build".into(), target.into()],
         env: BTreeMap::new(),
         current_dir: harness_root.clone(),
     };
-    let output = executor.run(&spec)?;
+    let command = command_vec(&spec);
+    let output = executor.run(&spec).map_err(|err| FuzzBuildFailure {
+        command: command.clone(),
+        detail: format!("failed to run cargo fuzz build for {target}: {err}"),
+    })?;
     if !output.success {
-        anyhow::bail!("cargo fuzz build failed for {target}");
+        return Err(FuzzBuildFailure {
+            command,
+            detail: output.combined_output,
+        });
     }
-    locate_fuzz_binary(&harness_root, target)
+    locate_fuzz_binary(&harness_root, target).map_err(|err| FuzzBuildFailure {
+        command,
+        detail: format!("{}\n\n{}", output.combined_output.trim(), err)
+            .trim()
+            .to_string(),
+    })
 }
 
 fn locate_fuzz_binary(harness_root: &Path, target: &str) -> Result<PathBuf> {
@@ -910,6 +1310,45 @@ mod tests {
     }
 
     #[test]
+    fn geiger_tool_panic_becomes_skipped() {
+        let dir = tempdir().unwrap();
+        let executor = ScriptedExecutor::new(vec![output(
+            false,
+            "thread 'main' panicked at cargo/core/package.rs:736:9\nassertion failed: self.pending_ids.insert(id)",
+        )]);
+
+        let phase = run_geiger(&crate_plan(dir.path().into()), dir.path(), &executor).unwrap();
+
+        assert_eq!(phase.status, PhaseStatus::Skipped);
+        assert!(phase.summary.contains("skipped"));
+    }
+
+    #[test]
+    fn geiger_uses_member_package_when_root_is_virtual_manifest() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            "[workspace]\nmembers=['pulldown-cmark']\n",
+        )
+        .unwrap();
+        let member = dir.path().join("pulldown-cmark");
+        std::fs::create_dir(&member).unwrap();
+        std::fs::write(
+            member.join("Cargo.toml"),
+            "[package]\nname='pulldown-cmark'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        let mut plan = crate_plan(dir.path().into());
+        plan.name = "pulldown-cmark".into();
+        let executor = ScriptedExecutor::new(vec![output(true, "{\"packages\":[]}")]);
+
+        let _ = run_geiger(&plan, dir.path(), &executor).unwrap();
+
+        let calls = executor.calls.lock().unwrap();
+        assert_eq!(calls[0].current_dir, member);
+    }
+
+    #[test]
     fn miri_case_uses_harness_test_filter_exact_and_triage() {
         let dir = tempdir().unwrap();
         let harness = dir.path().join("harness");
@@ -1090,5 +1529,199 @@ mod tests {
             run_fuzz_groups(&plan, None, 1, &BTreeMap::new(), dir.path(), &executor).unwrap();
         assert_eq!(phases[0].status, PhaseStatus::Skipped);
         assert!(phases[0].summary.contains("no fuzz targets"));
+    }
+
+    #[test]
+    fn fuzz_build_failure_becomes_error_report_and_other_targets_continue() {
+        let dir = tempdir().unwrap();
+        create_built_fuzz_binary(dir.path(), "other");
+        let mut plan = crate_plan(dir.path().into());
+        plan.fuzz_groups.push(FuzzGroupPlan {
+            name: "all".into(),
+            harness_dir: None,
+            all: true,
+            targets: Vec::new(),
+            time: Some(3),
+            budget_label: Some("smoke".into()),
+            env: BTreeMap::new(),
+        });
+        let executor = ScriptedExecutor::new(vec![
+            output(true, "parse\nother\n"),
+            output(false, "build failed"),
+            output(true, "built other"),
+            output(true, "#1 runs: 55 cov: 4"),
+        ]);
+
+        let phases =
+            run_fuzz_groups(&plan, Some(9), 1, &BTreeMap::new(), dir.path(), &executor).unwrap();
+
+        assert_eq!(phases.len(), 2);
+        assert_eq!(phases[0].status, PhaseStatus::Error);
+        assert!(phases[0].summary.contains("build error"));
+        assert_eq!(phases[1].status, PhaseStatus::Clean);
+        let calls = executor.calls.lock().unwrap();
+        assert_eq!(calls[1].args, vec!["fuzz", "build", "parse"]);
+        assert_eq!(calls[2].args, vec!["fuzz", "build", "other"]);
+    }
+
+    #[test]
+    fn fuzz_missing_bin_build_becomes_skipped() {
+        let dir = tempdir().unwrap();
+        create_built_fuzz_binary(dir.path(), "other");
+        let mut plan = crate_plan(dir.path().into());
+        plan.fuzz_groups.push(FuzzGroupPlan {
+            name: "all".into(),
+            harness_dir: None,
+            all: true,
+            targets: Vec::new(),
+            time: Some(3),
+            budget_label: Some("smoke".into()),
+            env: BTreeMap::new(),
+        });
+        let executor = ScriptedExecutor::new(vec![
+            output(true, "parse\nother\n"),
+            output(
+                false,
+                "error: can't find bin `parse` at path `/tmp/demo/fuzz/fuzz_targets/parse.rs`",
+            ),
+            output(true, "built other"),
+            output(true, "#1 runs: 55 cov: 4"),
+        ]);
+
+        let phases =
+            run_fuzz_groups(&plan, Some(9), 1, &BTreeMap::new(), dir.path(), &executor).unwrap();
+
+        assert_eq!(phases.len(), 2);
+        assert_eq!(phases[0].status, PhaseStatus::Skipped);
+        assert!(phases[0].summary.contains("declared source missing"));
+        assert_eq!(phases[1].status, PhaseStatus::Clean);
+    }
+
+    #[test]
+    fn fuzz_run_creates_empty_corpus_dir_when_missing() {
+        let repo = tempdir().unwrap();
+        let crate_dir = repo.path().join("targets").join("demo");
+        std::fs::create_dir_all(crate_dir.join("src")).unwrap();
+        std::fs::write(
+            crate_dir.join("Cargo.toml"),
+            "[package]\nname='demo'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        std::fs::write(crate_dir.join("src/lib.rs"), "pub fn demo() {}\n").unwrap();
+        create_built_fuzz_binary(&crate_dir, "parse");
+
+        let mut plan = crate_plan(crate_dir.clone());
+        plan.fuzz_groups.push(FuzzGroupPlan {
+            name: "named".into(),
+            harness_dir: None,
+            all: false,
+            targets: vec!["parse".into()],
+            time: Some(3),
+            budget_label: Some("smoke".into()),
+            env: BTreeMap::new(),
+        });
+        let executor = ScriptedExecutor::new(vec![
+            output(true, "parse\n"),
+            output(true, "built parse"),
+            output(true, "#1 runs: 5 cov: 1"),
+        ]);
+
+        let phases =
+            run_fuzz_groups(&plan, Some(9), 1, &BTreeMap::new(), repo.path(), &executor).unwrap();
+
+        assert_eq!(phases.len(), 1);
+        assert!(crate_dir.join("fuzz/corpus/parse").is_dir());
+    }
+
+    #[test]
+    fn fuzz_run_copies_seed_corpus_from_fuzz_harnesses_store() {
+        let repo = tempdir().unwrap();
+        let crate_dir = repo.path().join("targets").join("demo");
+        std::fs::create_dir_all(crate_dir.join("src")).unwrap();
+        std::fs::write(
+            crate_dir.join("Cargo.toml"),
+            "[package]\nname='demo'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        std::fs::write(crate_dir.join("src/lib.rs"), "pub fn demo() {}\n").unwrap();
+        create_built_fuzz_binary(&crate_dir, "parse");
+
+        let seed_dir = repo.path().join("fuzz_harnesses/demo/corpus/parse");
+        std::fs::create_dir_all(&seed_dir).unwrap();
+        std::fs::write(seed_dir.join("seed.bin"), b"seed").unwrap();
+
+        let mut plan = crate_plan(crate_dir.clone());
+        plan.fuzz_groups.push(FuzzGroupPlan {
+            name: "named".into(),
+            harness_dir: None,
+            all: false,
+            targets: vec!["parse".into()],
+            time: Some(3),
+            budget_label: Some("smoke".into()),
+            env: BTreeMap::new(),
+        });
+        let executor = ScriptedExecutor::new(vec![
+            output(true, "parse\n"),
+            output(true, "built parse"),
+            output(true, "#1 runs: 5 cov: 1"),
+        ]);
+
+        let phases =
+            run_fuzz_groups(&plan, Some(9), 1, &BTreeMap::new(), repo.path(), &executor).unwrap();
+
+        assert_eq!(phases.len(), 1);
+        assert_eq!(
+            std::fs::read(crate_dir.join("fuzz/corpus/parse/seed.bin")).unwrap(),
+            b"seed"
+        );
+    }
+
+    #[test]
+    fn fuzz_explicit_group_with_missing_workspace_becomes_skipped() {
+        let dir = tempdir().unwrap();
+        let mut plan = crate_plan(dir.path().into());
+        plan.fuzz_groups.push(FuzzGroupPlan {
+            name: "named".into(),
+            harness_dir: None,
+            all: false,
+            targets: vec!["parse".into()],
+            time: Some(30),
+            budget_label: Some("smoke".into()),
+            env: BTreeMap::new(),
+        });
+        let executor = ScriptedExecutor::new(vec![output(false, "missing fuzz workspace")]);
+
+        let phases =
+            run_fuzz_groups(&plan, None, 1, &BTreeMap::new(), dir.path(), &executor).unwrap();
+
+        assert_eq!(phases.len(), 1);
+        assert_eq!(phases[0].status, PhaseStatus::Skipped);
+        assert!(phases[0].summary.contains("no fuzz targets"));
+    }
+
+    #[test]
+    fn fuzz_explicit_group_with_missing_target_is_skipped() {
+        let dir = tempdir().unwrap();
+        let mut plan = crate_plan(dir.path().into());
+        plan.fuzz_groups.push(FuzzGroupPlan {
+            name: "named".into(),
+            harness_dir: None,
+            all: false,
+            targets: vec!["parse".into()],
+            time: Some(30),
+            budget_label: Some("smoke".into()),
+            env: BTreeMap::new(),
+        });
+        let executor = ScriptedExecutor::new(vec![output(true, "other\n")]);
+
+        let phases =
+            run_fuzz_groups(&plan, None, 1, &BTreeMap::new(), dir.path(), &executor).unwrap();
+
+        assert_eq!(phases.len(), 1);
+        assert_eq!(phases[0].status, PhaseStatus::Skipped);
+        assert!(phases[0].summary.contains("no fuzz targets"));
+        let calls = executor.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].args, vec!["fuzz", "list"]);
     }
 }
