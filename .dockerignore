@@ -1,0 +1,13 @@
+.git
+**/.git
+
+targets/
+
+unsafe-audit/target/
+miri_harnesses/target/
+fuzz_harnesses/target/
+
+study/output/
+tmp/
+
+**/*.log
