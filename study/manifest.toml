@@ -96,6 +96,7 @@ exact = true
 name = "existing_bstr_targets"
 budget_label = "baseline"
 all = true
+harness_dir = "fuzz_harnesses/bstr"
 
 [[crate]]
 name = "memchr"
@@ -157,6 +158,7 @@ exact = true
 [[crate.fuzz_group]]
 name = "existing_winnow_targets"
 budget_label = "extension"
+harness_dir = "fuzz_harnesses/winnow"
 targets = ["winnow_parse", "winnow_partial", "winnow_pairs"]
 
 [[crate]]
@@ -192,6 +194,7 @@ exact = true
 [[crate.fuzz_group]]
 name = "existing_toml_parser_targets"
 budget_label = "extension"
+harness_dir = "fuzz_harnesses/toml_parser"
 targets = ["toml_parser_parse", "toml_parser_decode", "toml_parser_value"]
 
 [[crate]]
@@ -278,6 +281,7 @@ exact = true
 [[crate.fuzz_group]]
 name = "existing_quick_xml_targets"
 budget_label = "extension"
+harness_dir = "fuzz_harnesses/quick-xml"
 targets = ["quick_xml_read", "quick_xml_attributes", "quick_xml_ns_read"]
 
 [[crate]]
@@ -305,6 +309,7 @@ exact = true
 [[crate.fuzz_group]]
 name = "existing_goblin_targets"
 budget_label = "extension"
+harness_dir = "fuzz_harnesses/goblin"
 targets = ["goblin_object_parse", "goblin_elf_parse", "goblin_pe_parse", "goblin_mach_parse"]
 
 [[crate]]
@@ -332,6 +337,7 @@ exact = true
 [[crate.fuzz_group]]
 name = "existing_toml_edit_targets"
 budget_label = "extension"
+harness_dir = "fuzz_harnesses/toml_edit"
 targets = ["toml_edit_parse", "toml_edit_mutate", "toml_edit_roundtrip"]
 
 [[crate]]
@@ -359,6 +365,7 @@ exact = true
 [[crate.fuzz_group]]
 name = "existing_pulldown_cmark_targets"
 budget_label = "extension"
+harness_dir = "fuzz_harnesses/pulldown-cmark"
 targets = ["pulldown_cmark_parse", "pulldown_cmark_events", "pulldown_cmark_offsets"]
 
 [[crate]]
@@ -386,4 +393,5 @@ exact = true
 [[crate.fuzz_group]]
 name = "existing_roxmltree_targets"
 budget_label = "extension"
+harness_dir = "fuzz_harnesses/roxmltree"
 targets = ["roxmltree_parse", "roxmltree_traverse", "roxmltree_options"]

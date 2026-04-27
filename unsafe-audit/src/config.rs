@@ -243,6 +243,7 @@ fn load_manifest_plan(path: &Path, options: RunOptions) -> Result<RunPlan> {
         let miri_cases = manifest_miri_cases(&item, base, manifest_root);
         let fuzz_groups = manifest_fuzz_groups(
             &item,
+            &crate_path,
             &study.fuzz_env,
             &options.fuzz_env,
             fuzz_time,
@@ -326,6 +327,7 @@ fn default_manifest_miri_case() -> MiriCasePlan {
 
 fn manifest_fuzz_groups(
     item: &ManifestCrate,
+    crate_path: &Path,
     study_fuzz_env: &BTreeMap<String, String>,
     cli_fuzz_env: &BTreeMap<String, String>,
     fuzz_time: Option<u64>,
@@ -368,7 +370,10 @@ fn manifest_fuzz_groups(
     };
 
     let mut ordered = Vec::new();
-    if builtin.is_empty() && (auto_harness.is_some() || !harness.is_empty()) {
+    if builtin.is_empty()
+        && crate_has_local_fuzz_workspace(crate_path)
+        && (auto_harness.is_some() || !harness.is_empty())
+    {
         ordered.push(default_manifest_fuzz_group(
             study_fuzz_env,
             cli_fuzz_env,
@@ -381,6 +386,10 @@ fn manifest_fuzz_groups(
         ordered.push(group);
     }
     ordered
+}
+
+fn crate_has_local_fuzz_workspace(crate_path: &Path) -> bool {
+    crate_path.join("fuzz").join("Cargo.toml").is_file()
 }
 
 fn manifest_fuzz_group_plan(

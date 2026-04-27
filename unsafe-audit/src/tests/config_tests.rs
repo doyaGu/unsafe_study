@@ -183,10 +183,21 @@ fn manifest_appends_detected_fuzz_harness_after_builtin_groups() {
 fn manifest_injects_builtin_fuzz_group_before_harness_only_groups() {
     let dir = tempdir().unwrap();
     let manifest = dir.path().join("study.toml");
+    std::fs::create_dir_all(dir.path().join("demo/fuzz")).unwrap();
     std::fs::create_dir_all(dir.path().join("fuzz_harnesses/demo")).unwrap();
+    std::fs::write(
+        dir.path().join("demo/Cargo.toml"),
+        "[package]\nname='demo'\nversion='0.1.0'\n",
+    )
+    .unwrap();
     std::fs::write(
         dir.path().join("fuzz_harnesses/demo/Cargo.toml"),
         "[package]\nname='demo-fuzz'\nversion='0.1.0'\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("demo/fuzz/Cargo.toml"),
+        "[package]\nname='demo-upstream-fuzz'\nversion='0.1.0'\n",
     )
     .unwrap();
     std::fs::write(
@@ -203,6 +214,36 @@ fn manifest_injects_builtin_fuzz_group_before_harness_only_groups() {
     assert!(groups[0].harness_dir.is_none());
     assert_eq!(groups[1].name, "manual_harness");
     assert!(groups[1].harness_dir.is_some());
+}
+
+#[test]
+fn manifest_does_not_inject_builtin_fuzz_group_without_local_workspace() {
+    let dir = tempdir().unwrap();
+    let manifest = dir.path().join("study.toml");
+    std::fs::create_dir_all(dir.path().join("demo")).unwrap();
+    std::fs::create_dir_all(dir.path().join("fuzz_harnesses/demo")).unwrap();
+    std::fs::write(
+        dir.path().join("demo/Cargo.toml"),
+        "[package]\nname='demo'\nversion='0.1.0'\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("fuzz_harnesses/demo/Cargo.toml"),
+        "[package]\nname='demo-fuzz'\nversion='0.1.0'\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &manifest,
+        "[[crate]]\nname='demo'\npath='demo'\n[[crate.fuzz_group]]\nname='manual_harness'\nharness_dir='fuzz_harnesses/demo'\nall=true\n",
+    )
+    .unwrap();
+
+    let plan = load_plan(&manifest, RunOptions::default()).unwrap();
+    let groups = &plan.crates[0].fuzz_groups;
+
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].name, "manual_harness");
+    assert!(groups[0].harness_dir.is_some());
 }
 
 #[test]
