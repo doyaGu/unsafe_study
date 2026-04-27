@@ -3,7 +3,7 @@ use crate::fs;
 use crate::report::{PhaseEvidence, PhaseKind, PhaseReport, PhaseStatus};
 use crate::runner::{excerpt, format_duration_ms, CommandExecutor, CommandOutput, CommandSpec};
 use anyhow::Result;
-use serde_json::Value;
+use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -23,7 +23,7 @@ pub fn run_geiger(
     let output = executor.run(&spec)?;
     let log_path = fs::phase_log_path(crate_root, "geiger", "root");
     fs::write_log(&log_path, &output.combined_output)?;
-    let (root_unsafe, dependency_unsafe) = parse_geiger_counts(&output.combined_output);
+    let (root_unsafe, dependency_unsafe) = parse_geiger_counts(&output.combined_output, crate_plan);
     Ok(PhaseReport {
         kind: PhaseKind::Geiger,
         name: "root".into(),
@@ -450,35 +450,146 @@ fn command_vec(spec: &CommandSpec) -> Vec<String> {
     command
 }
 
-fn parse_geiger_counts(output: &str) -> (Option<usize>, Option<usize>) {
-    let Some(start) = output.find('{') else {
-        return (None, None);
-    };
-    let Ok(json): Result<Value, _> = serde_json::from_str(&output[start..]) else {
-        return (None, None);
-    };
-    let root = find_number_by_key(&json, "unsafe");
-    (root, None)
+#[derive(Debug, Deserialize)]
+struct GeigerReport {
+    packages: Vec<GeigerPackage>,
 }
 
-fn find_number_by_key(value: &Value, key_hint: &str) -> Option<usize> {
-    match value {
-        Value::Object(map) => {
-            for (key, value) in map {
-                if key.to_ascii_lowercase().contains(key_hint) {
-                    if let Some(n) = value.as_u64() {
-                        return Some(n as usize);
-                    }
-                }
-                if let Some(found) = find_number_by_key(value, key_hint) {
-                    return Some(found);
-                }
-            }
-            None
-        }
-        Value::Array(values) => values.iter().find_map(|v| find_number_by_key(v, key_hint)),
-        _ => None,
+#[derive(Debug, Deserialize)]
+struct GeigerPackage {
+    package: GeigerPackageMeta,
+    unsafety: GeigerUnsafety,
+}
+
+#[derive(Debug, Deserialize)]
+struct GeigerPackageMeta {
+    id: GeigerPackageId,
+}
+
+#[derive(Debug, Deserialize)]
+struct GeigerPackageId {
+    name: String,
+    source: Option<GeigerPackageSource>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GeigerPackageSource {
+    #[serde(rename = "Path")]
+    path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GeigerUnsafety {
+    used: GeigerCounts,
+}
+
+#[derive(Debug, Deserialize)]
+struct GeigerCounts {
+    functions: GeigerUnsafeCount,
+    exprs: GeigerUnsafeCount,
+    item_impls: GeigerUnsafeCount,
+    item_traits: GeigerUnsafeCount,
+    methods: GeigerUnsafeCount,
+}
+
+#[derive(Debug, Deserialize)]
+struct GeigerUnsafeCount {
+    #[serde(rename = "unsafe_")]
+    unsafe_count: usize,
+}
+
+fn parse_geiger_counts(output: &str, crate_plan: &CratePlan) -> (Option<usize>, Option<usize>) {
+    let Some(report) = output.lines().rev().find_map(parse_geiger_report_line) else {
+        return (None, None);
+    };
+
+    let Some(root_index) = report
+        .packages
+        .iter()
+        .position(|package| is_root_geiger_package(package, crate_plan))
+        .or_else(|| {
+            report
+                .packages
+                .iter()
+                .position(|package| package.package.id.name == crate_plan.name)
+        })
+    else {
+        return (None, None);
+    };
+
+    let root_unsafe = geiger_used_unsafe_total(&report.packages[root_index]);
+    let dependency_unsafe = report
+        .packages
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index != root_index)
+        .map(|(_, package)| geiger_used_unsafe_total(package))
+        .sum();
+
+    (Some(root_unsafe), Some(dependency_unsafe))
+}
+
+fn parse_geiger_report_line(line: &str) -> Option<GeigerReport> {
+    let candidate = line.trim();
+    if !candidate.starts_with('{') || !candidate.contains("\"packages\"") {
+        return None;
     }
+    serde_json::from_str(candidate).ok()
+}
+
+fn is_root_geiger_package(package: &GeigerPackage, crate_plan: &CratePlan) -> bool {
+    if package.package.id.name != crate_plan.name {
+        return false;
+    }
+
+    let Some(source_path) = package
+        .package
+        .id
+        .source
+        .as_ref()
+        .and_then(|source| source.path.as_deref())
+    else {
+        return true;
+    };
+
+    let Some(decoded_path) = decode_geiger_file_path(source_path) else {
+        return false;
+    };
+    let Ok(root_path) = crate_plan.path.canonicalize() else {
+        return decoded_path == crate_plan.path;
+    };
+    decoded_path == root_path
+}
+
+fn decode_geiger_file_path(source_path: &str) -> Option<PathBuf> {
+    let encoded = source_path.strip_prefix("file://")?;
+    let mut decoded = String::with_capacity(encoded.len());
+    let bytes = encoded.as_bytes();
+    let mut index = 0;
+
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[index + 1..index + 3]).ok()?;
+            let value = u8::from_str_radix(hex, 16).ok()?;
+            decoded.push(char::from(value));
+            index += 3;
+        } else {
+            decoded.push(char::from(bytes[index]));
+            index += 1;
+        }
+    }
+
+    let path_only = decoded.split('#').next().unwrap_or(&decoded);
+    Some(PathBuf::from(path_only))
+}
+
+fn geiger_used_unsafe_total(package: &GeigerPackage) -> usize {
+    let used = &package.unsafety.used;
+    used.functions.unsafe_count
+        + used.exprs.unsafe_count
+        + used.item_impls.unsafe_count
+        + used.item_traits.unsafe_count
+        + used.methods.unsafe_count
 }
 
 fn miri_verdict(strict: &CommandOutput, baseline: Option<&CommandOutput>) -> String {
@@ -770,12 +881,31 @@ mod tests {
     }
 
     #[test]
-    fn geiger_writes_log_and_extracts_unsafe_count() {
+    fn geiger_writes_log_and_extracts_root_and_dependency_counts() {
         let dir = tempdir().unwrap();
-        let executor = ScriptedExecutor::new(vec![output(true, r#"prefix {"unsafe": 7}"#)]);
+        let geiger_output = format!(
+            "{{\"$message_type\":\"artifact\"}}\n\
+{{\"packages\":[\
+{{\"package\":{{\"id\":{{\"name\":\"demo\",\"source\":{{\"Path\":\"file://{}%230.1.0\"}}}}}},\"unsafety\":{{\"used\":{{\"functions\":{{\"unsafe_\":1}},\"exprs\":{{\"unsafe_\":4}},\"item_impls\":{{\"unsafe_\":0}},\"item_traits\":{{\"unsafe_\":0}},\"methods\":{{\"unsafe_\":2}}}}}}}},\
+{{\"package\":{{\"id\":{{\"name\":\"dep\",\"source\":{{\"Registry\":{{\"name\":\"crates.io\"}}}}}}}},\"unsafety\":{{\"used\":{{\"functions\":{{\"unsafe_\":3}},\"exprs\":{{\"unsafe_\":1}},\"item_impls\":{{\"unsafe_\":0}},\"item_traits\":{{\"unsafe_\":0}},\"methods\":{{\"unsafe_\":1}}}}}}}}\
+]}}",
+            dir.path().display()
+        );
+        let executor = ScriptedExecutor::new(vec![output(true, &geiger_output)]);
         let phase = run_geiger(&crate_plan(dir.path().into()), dir.path(), &executor).unwrap();
         assert_eq!(phase.status, PhaseStatus::Clean);
-        assert!(phase.summary.contains("root unsafe 7"));
+        assert!(phase.summary.contains("root unsafe 7, dependency unsafe 5"));
+        match phase.evidence {
+            PhaseEvidence::Geiger {
+                root_unsafe,
+                dependency_unsafe,
+                ..
+            } => {
+                assert_eq!(root_unsafe, Some(7));
+                assert_eq!(dependency_unsafe, Some(5));
+            }
+            _ => panic!("expected geiger evidence"),
+        }
         assert!(std::path::Path::new(phase.log_path.as_ref().unwrap()).exists());
     }
 
