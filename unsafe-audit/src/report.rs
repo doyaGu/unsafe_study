@@ -16,6 +16,17 @@ pub enum PhaseKind {
     Fuzz,
 }
 
+impl PhaseKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Scan => "scan",
+            Self::Geiger => "geiger",
+            Self::Miri => "miri",
+            Self::Fuzz => "fuzz",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PhaseStatus {
@@ -24,6 +35,18 @@ pub enum PhaseStatus {
     Finding,
     Skipped,
     Error,
+}
+
+impl PhaseStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Clean => "clean",
+            Self::Pass => "pass",
+            Self::Finding => "finding",
+            Self::Skipped => "skipped",
+            Self::Error => "error",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -228,9 +251,9 @@ pub fn render_markdown(report: &Report) -> String {
         for phase in &krate.phases {
             md.push_str(&format!(
                 "| {} | {} | {} | {} | {} | {} |\n",
-                phase_kind_label(phase.kind),
+                phase.kind.label(),
                 phase.name,
-                phase_status_label(phase.status),
+                phase.status.label(),
                 format!(
                     "{} ({} ms)",
                     phase.summary.replace('|', "\\|"),
@@ -255,36 +278,62 @@ pub fn render_markdown(report: &Report) -> String {
     md
 }
 
+fn phase_cell(phases: &[PhaseReport], kind: PhaseKind) -> &'static str {
+    let mut saw = false;
+    let mut best = PhaseStatus::Skipped;
+    for phase in phases.iter().filter(|phase| phase.kind == kind) {
+        saw = true;
+        best = match (best, phase.status) {
+            (_, PhaseStatus::Finding) => PhaseStatus::Finding,
+            (PhaseStatus::Finding, _) => PhaseStatus::Finding,
+            (_, PhaseStatus::Error) => PhaseStatus::Error,
+            (PhaseStatus::Error, _) => PhaseStatus::Error,
+            (_, PhaseStatus::Pass) => PhaseStatus::Pass,
+            (PhaseStatus::Pass, _) => PhaseStatus::Pass,
+            (_, PhaseStatus::Clean) => PhaseStatus::Clean,
+            (PhaseStatus::Clean, _) => PhaseStatus::Clean,
+            _ => PhaseStatus::Skipped,
+        };
+    }
+
+    if saw {
+        best.label()
+    } else {
+        "-"
+    }
+}
+
 fn phase_detail(phase: &PhaseReport) -> String {
+    let mut fields = Vec::new();
+
     match &phase.evidence {
         PhaseEvidence::Geiger {
             root_unsafe,
             dependency_unsafe,
-            ..
+            excerpt: excerpt_text,
         } => {
-            let mut details = Vec::new();
-            if let Some(root) = root_unsafe {
-                details.push(format!("root_unsafe={root}"));
+            if let Some(root_unsafe) = root_unsafe {
+                fields.push(format!("root_unsafe={root_unsafe}"));
             }
-            if let Some(deps) = dependency_unsafe {
-                details.push(format!("dependency_unsafe={deps}"));
+            if let Some(dependency_unsafe) = dependency_unsafe {
+                fields.push(format!("dependency_unsafe={dependency_unsafe}"));
             }
-            if details.is_empty() {
-                "-".into()
-            } else {
-                details.join("; ")
+            if let Some(preview) = detail_excerpt(excerpt_text.as_deref()) {
+                fields.push(format!("excerpt={preview}"));
             }
         }
         PhaseEvidence::Miri {
             verdict,
             ub_category,
-            ..
+            excerpt: excerpt_text,
         } => {
-            let mut details = vec![format!("verdict={verdict}")];
-            if let Some(category) = ub_category {
-                details.push(format!("ub_category={category}"));
+            fields.push(format!("verdict={verdict}"));
+            if let Some(ub_category) = ub_category {
+                fields.push(format!("ub_category={ub_category}"));
             }
-            details.join("; ")
+            if let Some(preview) = detail_excerpt(excerpt_text.as_deref()) {
+                fields.push(format!("excerpt={preview}"));
+            }
         }
         PhaseEvidence::Fuzz {
             target,
@@ -292,51 +341,43 @@ fn phase_detail(phase: &PhaseReport) -> String {
             artifact,
             error_kind,
             runs,
-            ..
+            excerpt: excerpt_text,
         } => {
-            let mut details = Vec::new();
             if let Some(target) = target {
-                details.push(format!("target={target}"));
+                fields.push(format!("target={target}"));
             }
             if let Some(budget_secs) = budget_secs {
-                details.push(format!("budget={budget_secs}s"));
-            }
-            if let Some(runs) = runs {
-                details.push(format!("runs={runs}"));
+                fields.push(format!("budget={budget_secs}s"));
             }
             if let Some(error_kind) = error_kind {
-                details.push(format!("error_kind={error_kind}"));
+                fields.push(format!("error_kind={error_kind}"));
             }
             if let Some(artifact) = artifact {
-                details.push(format!("artifact={artifact}"));
+                fields.push(format!("artifact={artifact}"));
             }
-            if details.is_empty() {
-                "-".into()
-            } else {
-                details.join("; ")
+            if let Some(runs) = runs {
+                fields.push(format!("runs={runs}"));
+            }
+            if let Some(preview) = detail_excerpt(excerpt_text.as_deref()) {
+                fields.push(format!("excerpt={preview}"));
             }
         }
-        PhaseEvidence::Scan => "-".into(),
+        PhaseEvidence::Scan => {}
+    }
+
+    if fields.is_empty() {
+        "-".into()
+    } else {
+        fields.join("; ")
     }
 }
 
-fn phase_kind_label(kind: PhaseKind) -> &'static str {
-    match kind {
-        PhaseKind::Scan => "scan",
-        PhaseKind::Geiger => "geiger",
-        PhaseKind::Miri => "miri",
-        PhaseKind::Fuzz => "fuzz",
-    }
+fn detail_excerpt(text: Option<&str>) -> Option<String> {
+    excerpt(text.unwrap_or_default()).map(|snippet| sanitize_markdown_cell(&snippet))
 }
 
-fn phase_status_label(status: PhaseStatus) -> &'static str {
-    match status {
-        PhaseStatus::Clean => "clean",
-        PhaseStatus::Pass => "pass",
-        PhaseStatus::Finding => "finding",
-        PhaseStatus::Skipped => "skipped",
-        PhaseStatus::Error => "error",
-    }
+fn sanitize_markdown_cell(text: &str) -> String {
+    text.replace('|', "\\|").replace('\n', " ")
 }
 
 fn profile_label(profile: RunProfile) -> &'static str {
@@ -347,438 +388,23 @@ fn profile_label(profile: RunProfile) -> &'static str {
     }
 }
 
-fn phase_selection_label(phases: PhaseSelection) -> String {
-    let mut enabled = Vec::new();
-    if phases.scan {
-        enabled.push("scan");
+fn phase_selection_label(selection: PhaseSelection) -> String {
+    let mut labels = Vec::new();
+    if selection.scan {
+        labels.push(PhaseKind::Scan.label());
     }
-    if phases.geiger {
-        enabled.push("geiger");
+    if selection.geiger {
+        labels.push(PhaseKind::Geiger.label());
     }
-    if phases.miri {
-        enabled.push("miri");
+    if selection.miri {
+        labels.push(PhaseKind::Miri.label());
     }
-    if phases.fuzz {
-        enabled.push("fuzz");
+    if selection.fuzz {
+        labels.push(PhaseKind::Fuzz.label());
     }
-    if enabled.is_empty() {
-        "-".into()
-    } else {
-        enabled.join(", ")
-    }
-}
-
-fn phase_cell(phases: &[PhaseReport], kind: PhaseKind) -> String {
-    let relevant: Vec<_> = phases.iter().filter(|p| p.kind == kind).collect();
-    if relevant.is_empty() {
-        return "-".into();
-    }
-    if relevant
-        .iter()
-        .any(|p| matches!(p.status, PhaseStatus::Finding))
-    {
-        "finding".into()
-    } else if relevant
-        .iter()
-        .any(|p| matches!(p.status, PhaseStatus::Error))
-    {
-        "error".into()
-    } else if relevant
-        .iter()
-        .any(|p| matches!(p.status, PhaseStatus::Pass))
-    {
-        "pass".into()
-    } else if relevant
-        .iter()
-        .any(|p| matches!(p.status, PhaseStatus::Clean))
-    {
-        "clean".into()
-    } else {
-        "skipped".into()
-    }
-}
-
-pub fn command_failure_report(
-    kind: PhaseKind,
-    name: String,
-    command: Vec<String>,
-    duration_ms: u128,
-    log_path: Option<String>,
-    output: &str,
-) -> PhaseReport {
-    PhaseReport {
-        kind,
-        name,
-        status: PhaseStatus::Error,
-        command,
-        duration_ms,
-        log_path,
-        summary: "command failed".into(),
-        evidence: PhaseEvidence::Geiger {
-            root_unsafe: None,
-            dependency_unsafe: None,
-            excerpt: excerpt(output),
-        },
-    }
+    labels.join(", ")
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::RunProfile;
-    use tempfile::tempdir;
-
-    fn test_execution() -> ExecutionConfig {
-        ExecutionConfig {
-            profile: RunProfile::Smoke,
-            jobs: 2,
-            fuzz_jobs: 3,
-            phases: PhaseSelection {
-                scan: true,
-                geiger: false,
-                miri: true,
-                fuzz: true,
-            },
-            miri_triage: true,
-            fuzz_time: Some(30),
-            fuzz_env: BTreeMap::from([("ASAN_OPTIONS".into(), "detect_leaks=0".into())]),
-        }
-    }
-
-    #[test]
-    fn markdown_contains_crate_rows() {
-        let report = Report {
-            schema_version: 1,
-            study_name: "s".into(),
-            execution: test_execution(),
-            crates: vec![CrateReport {
-                name: "demo".into(),
-                path: "demo".into(),
-                cohort: None,
-                unsafe_sites: Vec::new(),
-                pattern_summary: PatternSummary::default(),
-                phases: Vec::new(),
-                review_priority: Vec::new(),
-            }],
-        };
-        assert!(render_markdown(&report).contains("| demo | 0 |"));
-    }
-
-    #[test]
-    fn review_priority_prefers_high_risk_patterns() {
-        let sites = vec![
-            UnsafeSite {
-                id: "U1".into(),
-                file: "b.rs".into(),
-                line: 10,
-                kind: "operation".into(),
-                pattern: Some("unchecked_op".into()),
-            },
-            UnsafeSite {
-                id: "U2".into(),
-                file: "a.rs".into(),
-                line: 1,
-                kind: "operation".into(),
-                pattern: Some("transmute".into()),
-            },
-        ];
-        let rows = build_review_priority(&sites, &PatternSummary::default(), &[]);
-        assert_eq!(rows[0].site_id, "U2");
-    }
-
-    #[test]
-    fn review_priority_mentions_dynamic_findings_when_present() {
-        let sites = vec![UnsafeSite {
-            id: "U1".into(),
-            file: "a.rs".into(),
-            line: 1,
-            kind: "operation".into(),
-            pattern: Some("ptr_op".into()),
-        }];
-        let phases = vec![PhaseReport {
-            kind: PhaseKind::Miri,
-            name: "case".into(),
-            status: PhaseStatus::Finding,
-            command: Vec::new(),
-            duration_ms: 0,
-            log_path: None,
-            summary: "ub".into(),
-            evidence: PhaseEvidence::Miri {
-                verdict: "ub_observed".into(),
-                ub_category: Some("provenance".into()),
-                excerpt: None,
-            },
-        }];
-        let rows = build_review_priority(&sites, &PatternSummary::default(), &phases);
-        assert!(rows[0].reason.contains("dynamic finding"));
-    }
-
-    #[test]
-    fn write_reports_respects_requested_formats() {
-        let dir = tempdir().unwrap();
-        let report = Report {
-            schema_version: 1,
-            study_name: "s".into(),
-            execution: test_execution(),
-            crates: Vec::new(),
-        };
-        write_reports(&report, dir.path(), &[OutputFormat::Json]).unwrap();
-        assert!(dir.path().join("report.json").exists());
-        assert!(!dir.path().join("report.md").exists());
-    }
-
-    #[test]
-    fn overview_marks_finding_over_error_and_clean() {
-        let report = Report {
-            schema_version: 1,
-            study_name: "s".into(),
-            execution: test_execution(),
-            crates: vec![CrateReport {
-                name: "demo".into(),
-                path: "demo".into(),
-                cohort: None,
-                unsafe_sites: Vec::new(),
-                pattern_summary: PatternSummary::default(),
-                phases: vec![
-                    PhaseReport {
-                        kind: PhaseKind::Miri,
-                        name: "a".into(),
-                        status: PhaseStatus::Error,
-                        command: Vec::new(),
-                        duration_ms: 0,
-                        log_path: None,
-                        summary: "err".into(),
-                        evidence: PhaseEvidence::Scan,
-                    },
-                    PhaseReport {
-                        kind: PhaseKind::Miri,
-                        name: "b".into(),
-                        status: PhaseStatus::Finding,
-                        command: Vec::new(),
-                        duration_ms: 0,
-                        log_path: None,
-                        summary: "finding".into(),
-                        evidence: PhaseEvidence::Scan,
-                    },
-                ],
-                review_priority: Vec::new(),
-            }],
-        };
-        assert!(render_markdown(&report).contains("| demo | 0 | - | finding | - |"));
-    }
-
-    #[test]
-    fn overview_marks_skipped_when_no_phase_ran_cleanly() {
-        let report = Report {
-            schema_version: 1,
-            study_name: "s".into(),
-            execution: test_execution(),
-            crates: vec![CrateReport {
-                name: "demo".into(),
-                path: "demo".into(),
-                cohort: None,
-                unsafe_sites: Vec::new(),
-                pattern_summary: PatternSummary::default(),
-                phases: vec![PhaseReport {
-                    kind: PhaseKind::Fuzz,
-                    name: "fg.parse".into(),
-                    status: PhaseStatus::Skipped,
-                    command: Vec::new(),
-                    duration_ms: 0,
-                    log_path: None,
-                    summary: "skipped".into(),
-                    evidence: PhaseEvidence::Fuzz {
-                        target: Some("parse".into()),
-                        budget_secs: Some(30),
-                        artifact: None,
-                        error_kind: None,
-                        runs: None,
-                        excerpt: None,
-                    },
-                }],
-                review_priority: Vec::new(),
-            }],
-        };
-        assert!(render_markdown(&report).contains("| demo | 0 | - | - | skipped |"));
-    }
-
-    #[test]
-    fn overview_marks_pass_when_fuzz_hits_budget_cleanly() {
-        let report = Report {
-            schema_version: 1,
-            study_name: "s".into(),
-            execution: test_execution(),
-            crates: vec![CrateReport {
-                name: "demo".into(),
-                path: "demo".into(),
-                cohort: None,
-                unsafe_sites: Vec::new(),
-                pattern_summary: PatternSummary::default(),
-                phases: vec![PhaseReport {
-                    kind: PhaseKind::Fuzz,
-                    name: "fg.parse".into(),
-                    status: PhaseStatus::Pass,
-                    command: Vec::new(),
-                    duration_ms: 0,
-                    log_path: None,
-                    summary: "target parse, budget 30s, 123 runs, pass (reached budget limit without findings)".into(),
-                    evidence: PhaseEvidence::Fuzz {
-                        target: Some("parse".into()),
-                        budget_secs: Some(30),
-                        artifact: None,
-                        error_kind: None,
-                        runs: Some(123),
-                        excerpt: None,
-                    },
-                }],
-                review_priority: Vec::new(),
-            }],
-        };
-        assert!(render_markdown(&report).contains("| demo | 0 | - | - | pass |"));
-    }
-
-    #[test]
-    fn overview_prefers_pass_over_clean_for_mixed_fuzz_results() {
-        let report = Report {
-            schema_version: 1,
-            study_name: "s".into(),
-            execution: test_execution(),
-            crates: vec![CrateReport {
-                name: "demo".into(),
-                path: "demo".into(),
-                cohort: None,
-                unsafe_sites: Vec::new(),
-                pattern_summary: PatternSummary::default(),
-                phases: vec![
-                    PhaseReport {
-                        kind: PhaseKind::Fuzz,
-                        name: "fg.fast".into(),
-                        status: PhaseStatus::Clean,
-                        command: Vec::new(),
-                        duration_ms: 0,
-                        log_path: None,
-                        summary: "target fast, budget 30s, clean".into(),
-                        evidence: PhaseEvidence::Fuzz {
-                            target: Some("fast".into()),
-                            budget_secs: Some(30),
-                            artifact: None,
-                            error_kind: None,
-                            runs: Some(50),
-                            excerpt: None,
-                        },
-                    },
-                    PhaseReport {
-                        kind: PhaseKind::Fuzz,
-                        name: "fg.deep".into(),
-                        status: PhaseStatus::Pass,
-                        command: Vec::new(),
-                        duration_ms: 0,
-                        log_path: None,
-                        summary: "target deep, budget 30s, 123 runs, pass (reached budget limit without findings)".into(),
-                        evidence: PhaseEvidence::Fuzz {
-                            target: Some("deep".into()),
-                            budget_secs: Some(30),
-                            artifact: None,
-                            error_kind: None,
-                            runs: Some(123),
-                            excerpt: None,
-                        },
-                    },
-                ],
-                review_priority: Vec::new(),
-            }],
-        };
-        assert!(render_markdown(&report).contains("| demo | 0 | - | - | pass |"));
-    }
-
-    #[test]
-    fn markdown_includes_execution_metadata() {
-        let report = Report {
-            schema_version: 1,
-            study_name: "study".into(),
-            execution: test_execution(),
-            crates: Vec::new(),
-        };
-        let md = render_markdown(&report);
-        assert!(md.contains("Study: `study`"));
-        assert!(md.contains("- profile: `smoke`"));
-        assert!(md.contains("- jobs: `2`"));
-        assert!(md.contains("- fuzz_jobs: `3`"));
-        assert!(md.contains("- phases: `scan, miri, fuzz`"));
-        assert!(md.contains("- fuzz_env: `ASAN_OPTIONS=detect_leaks=0`"));
-    }
-
-    #[test]
-    fn markdown_shows_fuzz_error_kind_and_artifact_details() {
-        let report = Report {
-            schema_version: 1,
-            study_name: "study".into(),
-            execution: test_execution(),
-            crates: vec![CrateReport {
-                name: "demo".into(),
-                path: "demo".into(),
-                cohort: None,
-                unsafe_sites: Vec::new(),
-                pattern_summary: PatternSummary::default(),
-                phases: vec![PhaseReport {
-                    kind: PhaseKind::Fuzz,
-                    name: "fg.parse".into(),
-                    status: PhaseStatus::Error,
-                    command: Vec::new(),
-                    duration_ms: 31_000,
-                    log_path: Some("/tmp/fuzz.log".into()),
-                    summary: "target parse, budget 30s, error".into(),
-                    evidence: PhaseEvidence::Fuzz {
-                        target: Some("parse".into()),
-                        budget_secs: Some(30),
-                        artifact: Some("/tmp/crash-1".into()),
-                        error_kind: Some("environment_error".into()),
-                        runs: Some(123),
-                        excerpt: None,
-                    },
-                }],
-                review_priority: Vec::new(),
-            }],
-        };
-        let md = render_markdown(&report);
-        assert!(md.contains("error_kind=environment_error"));
-        assert!(md.contains("artifact=/tmp/crash-1"));
-        assert!(md.contains("runs=123"));
-    }
-
-    #[test]
-    fn markdown_uses_lowercase_phase_labels() {
-        let report = Report {
-            schema_version: 1,
-            study_name: "study".into(),
-            execution: test_execution(),
-            crates: vec![CrateReport {
-                name: "demo".into(),
-                path: "demo".into(),
-                cohort: None,
-                unsafe_sites: Vec::new(),
-                pattern_summary: PatternSummary::default(),
-                phases: vec![PhaseReport {
-                    kind: PhaseKind::Fuzz,
-                    name: "fg.parse".into(),
-                    status: PhaseStatus::Pass,
-                    command: Vec::new(),
-                    duration_ms: 31_000,
-                    log_path: Some("/tmp/fuzz.log".into()),
-                    summary: "target parse, budget 30s, 123 runs, pass (reached budget limit without findings)".into(),
-                    evidence: PhaseEvidence::Fuzz {
-                        target: Some("parse".into()),
-                        budget_secs: Some(30),
-                        artifact: None,
-                        error_kind: None,
-                        runs: Some(123),
-                        excerpt: None,
-                    },
-                }],
-                review_priority: Vec::new(),
-            }],
-        };
-        let md = render_markdown(&report);
-        assert!(md.contains("| fuzz | fg.parse | pass |"));
-    }
-}
+#[path = "tests/report_tests.rs"]
+mod tests;
