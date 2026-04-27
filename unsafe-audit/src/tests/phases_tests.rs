@@ -44,6 +44,9 @@ fn crate_plan(path: PathBuf) -> CratePlan {
 }
 
 fn create_built_fuzz_binary(root: &Path, target: &str) {
+    let direct_dir = root.join("fuzz").join("target").join("release");
+    std::fs::create_dir_all(&direct_dir).unwrap();
+    std::fs::write(direct_dir.join(target), "bin").unwrap();
     let dir = root
         .join("fuzz")
         .join("target")
@@ -198,6 +201,7 @@ fn miri_case_uses_harness_test_filter_exact_and_triage() {
         test: Some("api_smoke".into()),
         case: Some("case_name".into()),
         exact: true,
+        env: Default::default(),
     });
     let executor = ScriptedExecutor::new(vec![
         output(false, "undefined behavior: stacked borrow"),
@@ -236,6 +240,7 @@ fn clean_miri_case_does_not_report_ub_category() {
         test: Some("unaligned_public_inputs".into()),
         case: None,
         exact: false,
+        env: Default::default(),
     });
     let executor = ScriptedExecutor::new(vec![output(
         true,
@@ -301,8 +306,16 @@ fn fuzz_all_discovers_targets_runs_each_and_parses_runs() {
         }
     ));
     let calls = executor.calls.lock().unwrap();
-    assert_eq!(calls[1].args, vec!["fuzz", "build", "parse"]);
-    assert_eq!(calls[2].args, vec!["fuzz", "build", "other"]);
+    assert_eq!(calls[1].args[0], "build");
+    assert_eq!(calls[1].args.last().unwrap(), "parse");
+    assert_eq!(calls[2].args[0], "build");
+    assert_eq!(calls[2].args.last().unwrap(), "other");
+    assert_eq!(calls[1].env.get("ASAN_OPTIONS").unwrap(), "detect_odr_violation=0");
+    assert!(calls[1]
+        .env
+        .get(&fuzz_target_rustflags_var())
+        .unwrap()
+        .contains("-Cpasses=sancov-module"));
     assert!(calls[3].args.contains(&"-max_total_time=3".to_string()));
     assert_eq!(calls[3].env.get("GLOBAL").unwrap(), "1");
     assert_eq!(calls[3].env.get("A").unwrap(), "B");
@@ -441,8 +454,10 @@ fn fuzz_build_failure_becomes_error_report_and_other_targets_continue() {
     assert!(phases[0].summary.contains("build error"));
     assert_eq!(phases[1].status, PhaseStatus::Clean);
     let calls = executor.calls.lock().unwrap();
-    assert_eq!(calls[1].args, vec!["fuzz", "build", "parse"]);
-    assert_eq!(calls[2].args, vec!["fuzz", "build", "other"]);
+    assert_eq!(calls[1].args[0], "build");
+    assert_eq!(calls[1].args.last().unwrap(), "parse");
+    assert_eq!(calls[2].args[0], "build");
+    assert_eq!(calls[2].args.last().unwrap(), "other");
 }
 
 #[test]

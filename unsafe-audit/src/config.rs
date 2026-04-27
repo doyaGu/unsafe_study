@@ -137,6 +137,7 @@ pub struct MiriCasePlan {
     pub test: Option<String>,
     pub case: Option<String>,
     pub exact: bool,
+    pub env: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -190,6 +191,7 @@ fn load_single_crate_plan(input: &Path, options: RunOptions) -> Result<RunPlan> 
                 test: None,
                 case: None,
                 exact: false,
+                env: BTreeMap::new(),
             }],
             fuzz_groups: vec![FuzzGroupPlan {
                 name: "existing_targets".into(),
@@ -298,6 +300,7 @@ fn manifest_miri_cases(
             test: case.test.clone(),
             case: case.case.clone(),
             exact: case.exact.unwrap_or(false),
+            env: case.env.clone(),
         })
         .collect();
 
@@ -322,6 +325,7 @@ fn default_manifest_miri_case() -> MiriCasePlan {
         test: None,
         case: None,
         exact: false,
+        env: BTreeMap::new(),
     }
 }
 
@@ -590,6 +594,8 @@ struct ManifestMiriCase {
     test: Option<String>,
     case: Option<String>,
     exact: Option<bool>,
+    #[serde(default)]
+    env: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -102,6 +102,7 @@ fn run_plan_covers_scan_geiger_miri_fuzz_and_report_write() {
         test: Some("api".into()),
         case: Some("one_case".into()),
         exact: true,
+        env: Default::default(),
     }];
     plan.crates[0].fuzz_groups = vec![FuzzGroupPlan {
         name: "fg".into(),

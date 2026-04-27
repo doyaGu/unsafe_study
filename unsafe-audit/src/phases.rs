@@ -162,6 +162,7 @@ pub fn run_miri_cases(
             test: None,
             case: None,
             exact: false,
+            env: Default::default(),
         }]
     } else {
         crate_plan.miri_cases.clone()
@@ -263,6 +264,7 @@ fn miri_spec(crate_plan: &CratePlan, case: &MiriCasePlan, strict: bool) -> Comma
     } else {
         env.insert("MIRIFLAGS".into(), "-Zmiri-strict-provenance".into());
     }
+    env.extend(case.env.clone());
     CommandSpec {
         program: "cargo".into(),
         args,
@@ -886,7 +888,7 @@ fn build_fuzz_target(
     let spec = CommandSpec {
         program,
         args,
-        env: BTreeMap::new(),
+        env: fuzz_build_env(&layout),
         current_dir: layout.harness_root.clone(),
     };
     let command = command_vec(&spec);
@@ -910,7 +912,23 @@ fn build_fuzz_target(
 
 fn fuzz_build_command(layout: &FuzzLayout, target: &str) -> (String, Vec<String>) {
     match layout.mode {
-        FuzzHarnessMode::CargoFuzz => ("cargo".into(), cargo_fuzz_args("build", layout, Some(target))),
+        FuzzHarnessMode::CargoFuzz => (
+            "cargo".into(),
+            vec![
+                "build".into(),
+                "--manifest-path".into(),
+                layout.harness_root.join("fuzz").join("Cargo.toml").display().to_string(),
+                "--target".into(),
+                fuzz_target_triple().into(),
+                "--target-dir".into(),
+                layout.target_dir.display().to_string(),
+                "--release".into(),
+                "--config".into(),
+                "profile.release.debug=\"line-tables-only\"".into(),
+                "--bin".into(),
+                target.into(),
+            ],
+        ),
         FuzzHarnessMode::Standalone => (
             "cargo".into(),
             vec![
@@ -944,6 +962,10 @@ fn locate_fuzz_binary(layout: &FuzzLayout, target: &str) -> Result<PathBuf> {
         )
     }
     let target_dir = &layout.target_dir;
+    let direct_candidate = target_dir.join("release").join(target);
+    if direct_candidate.is_file() {
+        return Ok(direct_candidate);
+    }
     for host_dir in std::fs::read_dir(&target_dir)? {
         let host_dir = host_dir?;
         let candidate = host_dir.path().join("release").join(target);
@@ -1013,6 +1035,47 @@ fn cargo_fuzz_args(command: &str, _layout: &FuzzLayout, target: Option<&str>) ->
         args.push(target.into());
     }
     args
+}
+
+fn fuzz_build_env(layout: &FuzzLayout) -> BTreeMap<String, String> {
+    match layout.mode {
+        FuzzHarnessMode::CargoFuzz => BTreeMap::from([
+            ("ASAN_OPTIONS".into(), "detect_odr_violation=0".into()),
+            (
+                fuzz_target_rustflags_var(),
+                "-Cpasses=sancov-module -Zsanitizer=address --cfg fuzzing -Cdebug-assertions -Ccodegen-units=1".into(),
+            ),
+        ]),
+        FuzzHarnessMode::Standalone => BTreeMap::new(),
+    }
+}
+
+fn fuzz_target_triple() -> String {
+    let arch = std::env::consts::ARCH;
+    let os = std::env::consts::OS;
+    let env = if cfg!(target_env = "musl") {
+        "musl"
+    } else if cfg!(target_env = "gnu") {
+        "gnu"
+    } else {
+        ""
+    };
+
+    match (os, env.is_empty()) {
+        ("linux", false) => format!("{arch}-unknown-linux-{env}"),
+        ("linux", true) => format!("{arch}-unknown-linux"),
+        ("macos", _) => format!("{arch}-apple-darwin"),
+        ("windows", false) => format!("{arch}-pc-windows-{env}"),
+        ("windows", true) => format!("{arch}-pc-windows"),
+        _ => format!("{arch}-{os}"),
+    }
+}
+
+fn fuzz_target_rustflags_var() -> String {
+    format!(
+        "CARGO_TARGET_{}_RUSTFLAGS",
+        fuzz_target_triple().replace('-', "_").to_ascii_uppercase()
+    )
 }
 
 fn cargo_manifest_probe(manifest: &Path) -> Option<CargoManifestProbe> {

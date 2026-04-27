@@ -39,6 +39,10 @@ if ! rustup toolchain list | grep -q "$TOOLCHAIN"; then
     rustup component add rust-src --toolchain "$TOOLCHAIN"
 fi
 
+FUZZ_RUSTFLAGS="-Cpasses=sancov-module -Zsanitizer=address --cfg fuzzing -Cdebug-assertions -Ccodegen-units=1"
+TARGET_TRIPLE="$(rustc +"$TOOLCHAIN" -vV | sed -n 's/^host: //p')"
+TARGET_RUSTFLAGS_VAR="CARGO_TARGET_$(printf '%s' "$TARGET_TRIPLE" | tr '[:lower:]-' '[:upper:]_')_RUSTFLAGS"
+
 list_fuzz_targets() {
     local crate="$1"
     local crate_dir="$TARGETS_DIR/$crate"
@@ -89,7 +93,11 @@ run_fuzz_target() {
     fi
 
     local fuzz_corpus="fuzz/corpus/$target"
+    local artifacts_dir="fuzz/artifacts/$target"
+    local target_dir="fuzz/target"
+    local binary_path="$target_dir/$TARGET_TRIPLE/release/$target"
     mkdir -p "$fuzz_corpus"
+    mkdir -p "$artifacts_dir"
 
     # Copy seed corpus if available from the canonical per-crate store.
     local seed_dir="$CANONICAL_CORPUS_DIR/$crate/corpus/$target"
@@ -101,16 +109,39 @@ run_fuzz_target() {
     export CARGO_NET_OFFLINE=true
     export ASAN_OPTIONS="detect_odr_violation=0:detect_leaks=0"
 
+    echo "  Building fuzz target..."
+    env "$TARGET_RUSTFLAGS_VAR=$FUZZ_RUSTFLAGS" cargo +"$TOOLCHAIN" build \
+        --manifest-path fuzz/Cargo.toml \
+        --target "$TARGET_TRIPLE" \
+        --target-dir "$target_dir" \
+        --release \
+        --config 'profile.release.debug="line-tables-only"' \
+        --bin "$target" 2>&1 | tee "$log_file"
+    local build_exit=${PIPESTATUS[0]}
+    if [ $build_exit -ne 0 ]; then
+        echo "  BUILD FAILED"
+        echo ""
+        return $build_exit
+    fi
+
+    if [ ! -x "$binary_path" ]; then
+        echo "  BUILD FAILED: missing binary at $binary_path" | tee -a "$log_file"
+        echo ""
+        return 1
+    fi
+
     # Run the fuzzer
     echo "  Starting fuzzer..."
-    cargo +"$TOOLCHAIN" fuzz run "$target" -- -max_total_time="$time_secs" 2>&1 | tee "$log_file"
+    "$binary_path" \
+        "-artifact_prefix=${artifacts_dir}/" \
+        "-max_total_time=${time_secs}" \
+        "$fuzz_corpus" 2>&1 | tee -a "$log_file"
     local exit_code=${PIPESTATUS[0]}
 
     if [ $exit_code -ne 0 ]; then
         echo "  CRASH FOUND — check $log_file and fuzz/artifacts/$target/"
 
         # Copy artifacts to findings directory
-        local artifacts_dir="fuzz/artifacts/$target"
         if [ -d "$artifacts_dir" ] && [ "$(ls -A "$artifacts_dir")" ]; then
             mkdir -p "$FINDINGS_DIR/$crate"
             cp "$artifacts_dir"/* "$FINDINGS_DIR/$crate/" 2>/dev/null || true
