@@ -1,5 +1,6 @@
 use super::*;
-use crate::config::RunProfile;
+use crate::config::{CratePlan, RunPlan, RunProfile};
+use std::path::PathBuf;
 use tempfile::tempdir;
 
 fn test_execution() -> ExecutionConfig {
@@ -36,6 +37,51 @@ fn markdown_contains_crate_rows() {
         }],
     };
     assert!(render_markdown(&report).contains("| demo | 0 |"));
+}
+
+#[test]
+fn report_builders_pull_metadata_from_plans() {
+    let plan = RunPlan {
+        name: "study".into(),
+        output_root: PathBuf::from("out"),
+        profile: RunProfile::Smoke,
+        jobs: 2,
+        fuzz_jobs: 3,
+        phases: PhaseSelection {
+            scan: true,
+            geiger: true,
+            miri: false,
+            fuzz: false,
+        },
+        formats: vec![OutputFormat::Json],
+        dry_run: false,
+        miri_triage: true,
+        fuzz_time: Some(30),
+        fuzz_env: BTreeMap::from([("ASAN_OPTIONS".into(), "detect_leaks=0".into())]),
+        crates: Vec::new(),
+    };
+    let crate_plan = CratePlan {
+        name: "demo".into(),
+        path: PathBuf::from("targets/demo"),
+        cohort: Some("core".into()),
+        miri_cases: Vec::new(),
+        fuzz_groups: Vec::new(),
+    };
+
+    let crate_report = CrateReport::from_plan(
+        &crate_plan,
+        Vec::new(),
+        PatternSummary::default(),
+        Vec::new(),
+    );
+    let report = Report::from_plan(&plan, vec![crate_report]);
+
+    assert_eq!(report.study_name, "study");
+    assert_eq!(report.execution.jobs, 2);
+    assert_eq!(report.execution.fuzz_jobs, 3);
+    assert_eq!(report.crates[0].name, "demo");
+    assert_eq!(report.crates[0].path, "targets/demo");
+    assert_eq!(report.crates[0].cohort.as_deref(), Some("core"));
 }
 
 #[test]

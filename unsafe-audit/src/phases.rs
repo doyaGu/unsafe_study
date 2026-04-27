@@ -21,7 +21,7 @@ pub fn run_geiger(
         current_dir: geiger_working_dir(crate_plan),
     };
     let output = executor.run(&spec)?;
-    let log_path = fs::phase_log_path(crate_root, "geiger", "root");
+    let log_path = phase_log_path(crate_root, "geiger", "root");
     fs::write_log(&log_path, &output.combined_output)?;
     let (root_unsafe, dependency_unsafe) = parse_geiger_counts(&output.combined_output, crate_plan);
     let status = if output.success {
@@ -171,7 +171,7 @@ fn run_miri_case(
         None
     };
 
-    let log_path = fs::phase_log_path(crate_root, "miri", &case.name);
+    let log_path = phase_log_path(crate_root, "miri", &case.name);
     fs::write_log(&log_path, &combined_log)?;
     let verdict = miri_verdict(&strict, baseline.as_ref());
     let status = match verdict.as_str() {
@@ -431,7 +431,7 @@ fn run_fuzz_target(
     };
     let output = executor.run(&spec)?;
     let log_name = format!("{}.{}", group.name, target);
-    let log_path = fs::phase_log_path(crate_root, "fuzz", &log_name);
+    let log_path = phase_log_path(crate_root, "fuzz", &log_name);
     fs::write_log(&log_path, &output.combined_output)?;
     let status = classify_fuzz_status(&output);
     let error_kind = fuzz_error_kind(&output, status);
@@ -620,9 +620,17 @@ fn missing_fuzz_target_report(
 }
 
 fn write_phase_note(crate_root: &Path, phase: &str, name: &str, content: &str) -> Result<String> {
-    let log_path = fs::phase_log_path(crate_root, phase, name);
+    let log_path = phase_log_path(crate_root, phase, name);
     fs::write_log(&log_path, content)?;
     Ok(log_path.display().to_string())
+}
+
+fn phase_log_path(crate_root: &Path, phase: &str, name: &str) -> PathBuf {
+    crate_root.join("logs").join(format!(
+        "{}.{}.log",
+        fs::sanitize(phase),
+        fs::sanitize(name)
+    ))
 }
 
 fn run_fuzz_targets_parallel(

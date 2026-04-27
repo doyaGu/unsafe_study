@@ -10,18 +10,10 @@ pub fn crate_output_dir(root: &Path, crate_name: &str) -> PathBuf {
     root.join("crates").join(sanitize(crate_name))
 }
 
-pub fn phase_log_path(crate_root: &Path, phase: &str, name: &str) -> PathBuf {
-    crate_root
-        .join("logs")
-        .join(format!("{}.{}.log", sanitize(phase), sanitize(name)))
-}
-
-pub fn report_json_path(root: &Path) -> PathBuf {
-    root.join("report.json")
-}
-
-pub fn report_markdown_path(root: &Path) -> PathBuf {
-    root.join("report.md")
+pub fn create_crate_output_dir(root: &Path, crate_name: &str) -> Result<PathBuf> {
+    let path = crate_output_dir(root, crate_name);
+    std::fs::create_dir_all(&path)?;
+    Ok(path)
 }
 
 pub fn write_log(path: &Path, content: &str) -> Result<()> {

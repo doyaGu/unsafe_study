@@ -7,7 +7,7 @@ pub mod scan;
 
 use anyhow::Result;
 use config::{CratePlan, RunOptions, RunPlan};
-use report::{CrateReport, ExecutionConfig, Report};
+use report::{CrateReport, Report};
 use runner::{format_duration_ms, CommandExecutor, ProcessExecutor};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -31,12 +31,7 @@ pub fn run_plan(plan: &RunPlan, executor: &dyn CommandExecutor) -> Result<Report
         for (idx, crate_plan) in plan.crates.iter().enumerate() {
             crates.push(run_crate(crate_plan, plan, executor, idx + 1, total)?);
         }
-        return Ok(Report {
-            schema_version: 1,
-            study_name: plan.name.clone(),
-            execution: execution_config(plan),
-            crates,
-        });
+        return Ok(Report::from_plan(plan, crates));
     }
 
     let next = Arc::new(Mutex::new(0usize));
@@ -68,12 +63,7 @@ pub fn run_plan(plan: &RunPlan, executor: &dyn CommandExecutor) -> Result<Report
         crates.push(result.take().unwrap()?);
     }
 
-    Ok(Report {
-        schema_version: 1,
-        study_name: plan.name.clone(),
-        execution: execution_config(plan),
-        crates,
-    })
+    Ok(Report::from_plan(plan, crates))
 }
 
 pub fn run_and_write(input: &Path, options: RunOptions) -> Result<Report> {
@@ -97,8 +87,7 @@ fn run_crate(
 ) -> Result<CrateReport> {
     eprintln!("[{}/{}] crate {}: start", ordinal, total, crate_plan.name);
     let crate_start = Instant::now();
-    let crate_root = fs::crate_output_dir(&plan.output_root, &crate_plan.name);
-    std::fs::create_dir_all(&crate_root)?;
+    let crate_root = fs::create_crate_output_dir(&plan.output_root, &crate_plan.name)?;
 
     let scan = if plan.phases.scan {
         Some(scan::scan_crate(&crate_plan.path)?)
@@ -118,7 +107,7 @@ fn run_crate(
             ordinal,
             total,
             crate_plan.name,
-            status_label(phase.status),
+            phase.status.label(),
             format_duration_ms(phase.duration_ms)
         );
         phases.push(phase);
@@ -161,9 +150,6 @@ fn run_crate(
     let (unsafe_sites, pattern_summary) = scan
         .map(|s| (s.sites, s.summary))
         .unwrap_or_else(|| (Vec::new(), Default::default()));
-
-    let review_priority = report::build_review_priority(&unsafe_sites, &pattern_summary, &phases);
-
     eprintln!(
         "[{}/{}] crate {}: done ({} unsafe sites, {} phase records, {})",
         ordinal,
@@ -174,31 +160,12 @@ fn run_crate(
         format_duration_ms(crate_start.elapsed().as_millis())
     );
 
-    Ok(CrateReport {
-        name: crate_plan.name.clone(),
-        path: crate_plan.path.display().to_string(),
-        cohort: crate_plan.cohort.clone(),
+    Ok(CrateReport::from_plan(
+        crate_plan,
         unsafe_sites,
         pattern_summary,
         phases,
-        review_priority,
-    })
-}
-
-fn status_label(status: report::PhaseStatus) -> &'static str {
-    status.label()
-}
-
-fn execution_config(plan: &RunPlan) -> ExecutionConfig {
-    ExecutionConfig {
-        profile: plan.profile,
-        jobs: plan.jobs,
-        fuzz_jobs: plan.fuzz_jobs,
-        phases: plan.phases,
-        miri_triage: plan.miri_triage,
-        fuzz_time: plan.fuzz_time,
-        fuzz_env: plan.fuzz_env.clone(),
-    }
+    ))
 }
 
 #[cfg(test)]

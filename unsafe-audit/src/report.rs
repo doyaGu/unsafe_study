@@ -1,5 +1,4 @@
-use crate::config::{OutputFormat, PhaseSelection, RunProfile};
-use crate::fs;
+use crate::config::{CratePlan, OutputFormat, PhaseSelection, RunPlan, RunProfile};
 use crate::runner::excerpt;
 use crate::scan::{PatternSummary, UnsafeSite};
 use anyhow::Result;
@@ -68,6 +67,20 @@ pub struct ExecutionConfig {
     pub fuzz_env: BTreeMap<String, String>,
 }
 
+impl ExecutionConfig {
+    pub fn from_plan(plan: &RunPlan) -> Self {
+        Self {
+            profile: plan.profile,
+            jobs: plan.jobs,
+            fuzz_jobs: plan.fuzz_jobs,
+            phases: plan.phases,
+            miri_triage: plan.miri_triage,
+            fuzz_time: plan.fuzz_time,
+            fuzz_env: plan.fuzz_env.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrateReport {
     pub name: String,
@@ -77,6 +90,27 @@ pub struct CrateReport {
     pub pattern_summary: PatternSummary,
     pub phases: Vec<PhaseReport>,
     pub review_priority: Vec<ReviewRow>,
+}
+
+impl CrateReport {
+    pub fn from_plan(
+        crate_plan: &CratePlan,
+        unsafe_sites: Vec<UnsafeSite>,
+        pattern_summary: PatternSummary,
+        phases: Vec<PhaseReport>,
+    ) -> Self {
+        let review_priority = build_review_priority(&unsafe_sites, &pattern_summary, &phases);
+
+        Self {
+            name: crate_plan.name.clone(),
+            path: crate_plan.path.display().to_string(),
+            cohort: crate_plan.cohort.clone(),
+            unsafe_sites,
+            pattern_summary,
+            phases,
+            review_priority,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,20 +157,25 @@ pub struct ReviewRow {
     pub reason: String,
 }
 
+impl Report {
+    pub fn from_plan(plan: &RunPlan, crates: Vec<CrateReport>) -> Self {
+        Self {
+            schema_version: 1,
+            study_name: plan.name.clone(),
+            execution: ExecutionConfig::from_plan(plan),
+            crates,
+        }
+    }
+}
+
 pub fn write_reports(report: &Report, output_root: &Path, formats: &[OutputFormat]) -> Result<()> {
     for format in formats {
         match format {
             OutputFormat::Json => {
-                std::fs::write(
-                    fs::report_json_path(output_root),
-                    serde_json::to_string_pretty(report)?,
-                )?;
+                std::fs::write(report_json_path(output_root), serde_json::to_string_pretty(report)?)?;
             }
             OutputFormat::Markdown => {
-                std::fs::write(
-                    fs::report_markdown_path(output_root),
-                    render_markdown(report),
-                )?;
+                std::fs::write(report_markdown_path(output_root), render_markdown(report))?;
             }
         }
     }
@@ -192,10 +231,10 @@ pub fn render_markdown(report: &Report) -> String {
     md.push_str("## Execution\n\n");
     md.push_str(&format!(
         "- profile: `{}`\n- jobs: `{}`\n- fuzz_jobs: `{}`\n- phases: `{}`\n- miri_triage: `{}`\n- default_fuzz_time: `{}`\n",
-        profile_label(report.execution.profile),
+        report.execution.profile.label(),
         report.execution.jobs,
         report.execution.fuzz_jobs,
-        phase_selection_label(report.execution.phases),
+        report.execution.phases.label(),
         report.execution.miri_triage,
         report
             .execution
@@ -276,6 +315,14 @@ pub fn render_markdown(report: &Report) -> String {
         }
     }
     md
+}
+
+fn report_json_path(root: &Path) -> std::path::PathBuf {
+    root.join("report.json")
+}
+
+fn report_markdown_path(root: &Path) -> std::path::PathBuf {
+    root.join("report.md")
 }
 
 fn phase_cell(phases: &[PhaseReport], kind: PhaseKind) -> &'static str {
@@ -378,31 +425,6 @@ fn detail_excerpt(text: Option<&str>) -> Option<String> {
 
 fn sanitize_markdown_cell(text: &str) -> String {
     text.replace('|', "\\|").replace('\n', " ")
-}
-
-fn profile_label(profile: RunProfile) -> &'static str {
-    match profile {
-        RunProfile::Smoke => "smoke",
-        RunProfile::Baseline => "baseline",
-        RunProfile::Full => "full",
-    }
-}
-
-fn phase_selection_label(selection: PhaseSelection) -> String {
-    let mut labels = Vec::new();
-    if selection.scan {
-        labels.push(PhaseKind::Scan.label());
-    }
-    if selection.geiger {
-        labels.push(PhaseKind::Geiger.label());
-    }
-    if selection.miri {
-        labels.push(PhaseKind::Miri.label());
-    }
-    if selection.fuzz {
-        labels.push(PhaseKind::Fuzz.label());
-    }
-    labels.join(", ")
 }
 
 #[cfg(test)]
