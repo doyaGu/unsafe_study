@@ -1,75 +1,112 @@
-mod audit_cli;
-mod cli;
-mod console;
-mod coverage_cli;
-#[cfg(test)]
-mod main_tests;
-mod study_cli;
+use anyhow::Result;
+use clap::{Parser, ValueEnum};
+use std::path::PathBuf;
+use unsafe_audit::config::{PhaseSelection, RunOptions};
 
-use anyhow::{bail, Result};
-use clap::Parser;
-use colored::*;
-use std::ffi::OsString;
+#[derive(Debug, Parser)]
+#[command(
+    author,
+    version,
+    about = "Collect research evidence for Rust unsafe usage"
+)]
+struct Cli {
+    /// Crate directory or study manifest TOML.
+    input: PathBuf,
 
-use audit_cli::run_audit_mode;
-use cli::Cli;
-use coverage_cli::prepare_coverage_json;
-use study_cli::{detach_study_run, detached_child_args, print_study_status, run_study_mode};
-use unsafe_audit::stop_study_run;
+    /// Output directory.
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+
+    /// Comma-separated crate names when input is a study manifest.
+    #[arg(long, value_delimiter = ',')]
+    crates: Vec<String>,
+
+    /// Print normalized plan without running external tools.
+    #[arg(long)]
+    dry_run: bool,
+
+    #[arg(long)]
+    skip_scan: bool,
+
+    #[arg(long)]
+    skip_geiger: bool,
+
+    #[arg(long)]
+    skip_miri: bool,
+
+    #[arg(long)]
+    skip_fuzz: bool,
+
+    /// Run strict Miri first, then a baseline pass when strict reports UB.
+    #[arg(long)]
+    miri_triage: bool,
+
+    /// Default fuzz time budget in seconds.
+    #[arg(long)]
+    fuzz_time: Option<u64>,
+
+    /// Environment override for fuzz runs, as KEY=VALUE.
+    #[arg(long)]
+    fuzz_env: Vec<String>,
+
+    /// Report format. May be repeated.
+    #[arg(long, value_enum, default_values_t = [FormatArg::Json, FormatArg::Markdown])]
+    format: Vec<FormatArg>,
+}
+
+#[derive(Debug, Clone, ValueEnum)]
+enum FormatArg {
+    Json,
+    Markdown,
+}
 
 fn main() -> Result<()> {
-    let raw_args: Vec<OsString> = std::env::args_os().collect();
-    let args: Vec<String> = std::env::args().collect();
-    let cli = if args.len() > 1 && args[1] == "unsafe-audit" {
-        Cli::parse_from(args.iter().skip(1))
-    } else {
-        Cli::parse()
+    let cli = Cli::parse();
+    let options = RunOptions {
+        output_root: cli.output,
+        crates: cli.crates,
+        dry_run: cli.dry_run,
+        phases: PhaseSelection {
+            scan: !cli.skip_scan,
+            geiger: !cli.skip_geiger,
+            miri: !cli.skip_miri,
+            fuzz: !cli.skip_fuzz,
+        },
+        miri_triage: cli.miri_triage,
+        fuzz_time: cli.fuzz_time,
+        fuzz_env: parse_env(cli.fuzz_env)?,
+        formats: cli
+            .format
+            .into_iter()
+            .map(|f| match f {
+                FormatArg::Json => unsafe_audit::OutputFormat::Json,
+                FormatArg::Markdown => unsafe_audit::OutputFormat::Markdown,
+            })
+            .collect(),
     };
-    let input_path = std::env::current_dir()?.join(&cli.path);
-    if cli.status || cli.stop {
-        if !input_path.is_file() {
-            bail!("--status/--stop are only supported when PATH is a study manifest file");
-        }
-        if cli.status && cli.stop {
-            bail!("--status and --stop cannot be used together");
-        }
-        if cli.stop {
-            let stopped = stop_study_run(&input_path, cli.output.as_deref())?;
-            if stopped {
-                println!(
-                    "  {} {}",
-                    "Stop signal sent.".bold().green(),
-                    input_path.display()
-                );
-            } else {
-                println!(
-                    "  {} {}",
-                    "No live study process found.".bold().yellow(),
-                    input_path.display()
-                );
-            }
-            return Ok(());
-        }
-        return print_study_status(&input_path, cli.output.as_deref());
-    }
-    if input_path.is_file() && cli.detach {
-        return detach_study_run(&raw_args, &cli, &input_path);
-    }
-    let miri_coverage_json = prepare_coverage_json(
-        "miri",
-        cli.miri_coverage_json.as_ref(),
-        cli.miri_profraw_dir.as_ref(),
-        &cli.miri_coverage_objects,
-    )?;
-    let fuzz_coverage_json = prepare_coverage_json(
-        "fuzz",
-        cli.fuzz_coverage_json.as_ref(),
-        cli.fuzz_profraw_dir.as_ref(),
-        &cli.fuzz_coverage_objects,
-    )?;
 
-    if input_path.is_file() {
-        return run_study_mode(&cli, &input_path, miri_coverage_json, fuzz_coverage_json);
+    if options.dry_run {
+        let plan = unsafe_audit::load_plan(&cli.input, options)?;
+        println!("{}", serde_json::to_string_pretty(&plan)?);
+        return Ok(());
     }
-    run_audit_mode(&cli, input_path, miri_coverage_json, fuzz_coverage_json)
+
+    let report = unsafe_audit::run_and_write(&cli.input, options)?;
+    println!(
+        "wrote report for {} crate(s), schema v{}",
+        report.crates.len(),
+        report.schema_version
+    );
+    Ok(())
+}
+
+fn parse_env(values: Vec<String>) -> Result<std::collections::BTreeMap<String, String>> {
+    let mut env = std::collections::BTreeMap::new();
+    for value in values {
+        let Some((key, val)) = value.split_once('=') else {
+            anyhow::bail!("--fuzz-env must use KEY=VALUE, got {value}");
+        };
+        env.insert(key.to_string(), val.to_string());
+    }
+    Ok(env)
 }
