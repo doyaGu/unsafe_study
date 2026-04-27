@@ -12,11 +12,8 @@ bash scripts/run_all.sh
 ```
 
 That wrapper keeps execution pinned to this repository's `unsafe-audit` crate,
-asks Cargo for the emitted executable path when possible, and falls back to
-`cargo run` if that discovery step is unavailable.
-
-The low-level equivalent is to pass the manifest path to `unsafe-audit`
-directly:
+resolves the emitted executable path from Cargo when possible, and falls back
+to `cargo run` otherwise. The low-level equivalent is:
 
 ```bash
 cargo run --manifest-path unsafe-audit/Cargo.toml -- \
@@ -148,18 +145,6 @@ Restricted study subset:
 
 ```bash
 bash scripts/run_all.sh \
-  --crates httparse,simd-json \
-  --profile smoke \
-  --jobs 2 \
-  --fuzz-jobs 2 \
-  --output /tmp/study-smoke
-```
-
-Direct equivalent for the same subset:
-
-```bash
-cargo run --manifest-path unsafe-audit/Cargo.toml -- \
-  study/manifest.toml \
   --crates httparse,simd-json \
   --profile smoke \
   --jobs 2 \

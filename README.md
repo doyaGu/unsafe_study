@@ -269,13 +269,14 @@ The canonical 12-crate protocol lives in:
 
 - [study/manifest.toml](study/manifest.toml)
 - [study/README.md](study/README.md)
+- [study/FULL_RUN_GUIDE.md](study/FULL_RUN_GUIDE.md)
 
 The recommended Linux entrypoint is [scripts/run_all.sh](scripts/run_all.sh).
 It builds the repo-local `unsafe-audit` crate, resolves the emitted executable
-path from Cargo metadata when possible, and falls back to `cargo run` if that
-discovery step is unavailable.
-
-The low-level equivalent remains:
+path from Cargo metadata when possible, and falls back to `cargo run`
+otherwise. For prerequisites, profiles, and end-to-end examples, use
+[study/FULL_RUN_GUIDE.md](study/FULL_RUN_GUIDE.md). The low-level equivalent
+remains:
 
 ```bash
 cargo run --manifest-path unsafe-audit/Cargo.toml -- study/manifest.toml

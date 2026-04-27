@@ -96,15 +96,16 @@ been validated. Use this sequence.
 
 Use `bash scripts/run_all.sh ...` as the normal Linux entrypoint.
 
-The wrapper:
+It builds the repo-local `unsafe-audit` crate, resolves the emitted executable
+path from Cargo when possible, and falls back to `cargo run` otherwise. This
+avoids hardcoding a `target/` path while keeping execution pinned to the
+checked-out repository.
 
-- builds the repo-local `unsafe-audit` crate
-- reads Cargo JSON messages to find the emitted executable path when possible
-- executes that resolved binary directly
-- falls back to `cargo run --manifest-path unsafe-audit/Cargo.toml -- study/manifest.toml ...` if path discovery is unavailable
+If you want the low-level form, replace the wrapper with:
 
-This avoids hardcoding a `target/` path while still keeping execution pinned to
-the checked-out repository.
+```bash
+cargo run --manifest-path unsafe-audit/Cargo.toml -- study/manifest.toml ...
+```
 
 ### 1. Preflight checks
 
@@ -133,14 +134,6 @@ running analysis tools.
 bash scripts/run_all.sh --dry-run
 ```
 
-Direct equivalent:
-
-```bash
-cargo run --manifest-path unsafe-audit/Cargo.toml -- \
-  study/manifest.toml \
-  --dry-run
-```
-
 Expected outcome:
 
 - 12 crates appear in the plan
@@ -154,17 +147,6 @@ This is the minimum end-to-end health check for all phases and all crates.
 
 ```bash
 bash scripts/run_all.sh \
-  --profile smoke \
-  --jobs 4 \
-  --fuzz-jobs 4 \
-  --output /tmp/unsafe-study-smoke
-```
-
-Direct equivalent:
-
-```bash
-cargo run --manifest-path unsafe-audit/Cargo.toml -- \
-  study/manifest.toml \
   --profile smoke \
   --jobs 4 \
   --fuzz-jobs 4 \
@@ -190,17 +172,6 @@ Wrapper script:
 
 ```bash
 bash scripts/run_all.sh \
-  --profile full \
-  --jobs 4 \
-  --fuzz-jobs 4 \
-  --output /tmp/unsafe-study-full
-```
-
-Equivalent direct invocation:
-
-```bash
-cargo run --manifest-path unsafe-audit/Cargo.toml -- \
-  study/manifest.toml \
   --profile full \
   --jobs 4 \
   --fuzz-jobs 4 \

@@ -86,7 +86,6 @@ execution behavior.
 These directories support local execution but are not part of the main evidence
 chain.
 
-- `scripts/`: wrappers and helper scripts.
 - `scripts/`: wrappers and helper scripts. In particular,
   `scripts/run_all.sh` resolves the repo-local `unsafe-audit` binary from Cargo
   output instead of hardcoding a `target/` path.

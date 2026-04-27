@@ -532,31 +532,34 @@ intend to measure.
 
 - Debian/Ubuntu Linux (or any Linux distribution)
 - Rust nightly-2026-02-01 (pinned via `rust-toolchain.toml`)
-- `cargo-fuzz` (installed via `cargo install cargo-fuzz`)
+- `cargo-fuzz` and `cargo-geiger`
+- `miri` and `rust-src` installed for the pinned nightly toolchain
 
 ### Quick Start
 
+The repository runbook is intentionally centralized. For full prerequisites,
+profiles, and troubleshooting, use [README.md](../../README.md) and
+[study/FULL_RUN_GUIDE.md](../../study/FULL_RUN_GUIDE.md).
+
+The smallest end-to-end reproduction from the repository root is:
+
 ```bash
-# Install Rust and tools
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-source "$HOME/.cargo/env"
-# rust-toolchain.toml will auto-select nightly-2026-02-01
-cargo install cargo-fuzz
+bash scripts/run_all.sh --profile smoke --jobs 4 --fuzz-jobs 4
+```
 
-# Run the full pipeline
-bash scripts/run_all.sh
+Useful follow-ups:
 
-# Or run individual phases
-bash scripts/run_all.sh --skip-fuzz    # Geiger + Miri only
-bash scripts/run_all.sh --skip-geiger --skip-miri  # Fuzz only
-bash scripts/run_fuzz.sh httparse parse_request 300  # Single target
+```bash
+bash scripts/run_all.sh --profile full --jobs 4 --fuzz-jobs 4
+bash scripts/run_all.sh --skip-fuzz
+bash scripts/run_fuzz.sh httparse parse_request 300
 ```
 
 ### Key Files
 
 | File | Purpose |
 |------|---------|
-| `scripts/run_all.sh` | Full pipeline automation (Linux); resolves and executes the repo-local `unsafe-audit` binary when possible, then falls back to `cargo run` |
+| `scripts/run_all.sh` | Recommended Linux entrypoint for manifest-driven study runs |
 | `scripts/run_fuzz.sh` | Fuzzing automation (Linux) |
 | `scripts/summarize_geiger.py` | Geiger JSON to Markdown summary |
 | `evidence/geiger/*_annotations.md` | Unsafe hotspot annotations per crate |
