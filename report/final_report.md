@@ -1,6 +1,6 @@
 # Unsafe Study -- Final Case Study Report
 
-> Status note (April 21, 2026): this document is currently a historical writeup. The executable study protocol has since moved to `study/manifest.toml` and native `unsafe-audit <manifest-path>` execution, and the tool/report schema is now `schema_version = 6`. The quantitative claims below should be treated as pre-overhaul results until the full 12-crate rerun is regenerated from the manifest-driven pipeline.
+> Status note (April 21, 2026; corrected April 27, 2026): this document is currently a historical writeup. The executable study protocol is `study/manifest.toml` plus native `unsafe-audit <manifest-path>` execution, and the current implementation writes `schema_version = 1` reports. Where this document's prose conflicts with the current runner, treat the implementation and generated `report.json` as authoritative.
 
 **Author:** (redacted)
 **Date:** 2026-04-05 (last updated)

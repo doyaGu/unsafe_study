@@ -114,6 +114,7 @@ out/
 
 The top-level report includes execution metadata:
 
+- `schema_version` (currently `1`)
 - `profile`
 - `jobs`
 - `fuzz_jobs`
