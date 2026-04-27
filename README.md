@@ -9,6 +9,25 @@
 The main executable deliverable is `unsafe-audit`, a local CLI that runs a
 compact study protocol over one crate or a manifest-defined crate cohort.
 
+## Workspace Layout
+
+The repository is easiest to navigate if you read it in terms of the research
+workflow rather than as one flat collection of folders.
+
+Canonical layout guide:
+
+- [WORKSPACE_MAP.md](WORKSPACE_MAP.md)
+
+Short version:
+
+- `unsafe-audit/`: the study runner
+- `study/` + `targets/`: the canonical study inputs
+- `miri_harnesses/` + `fuzz_harnesses/`: added dynamic harnesses for targeted
+  Miri coverage and active extracted fuzz harnesses
+- `evidence/geiger/` + `evidence/miri/` + `evidence/fuzz/`: archived evidence
+- `docs/report/` + `docs/proposal/`: writing and research outputs
+- `scripts/` + `tmp/`: utility and scratch space
+
 ## Current Tool Shape
 
 `unsafe-audit` is now a compact study runner, not the earlier exploration-heavy
@@ -264,8 +283,10 @@ cargo run --manifest-path unsafe-audit/Cargo.toml -- study/manifest.toml
 unsafe-audit/           current CLI/library implementation
 study/                  manifest-driven research protocol
 targets/                local target crates
-extensions_harness/     extra Miri/fuzz harnesses used by the study
-report/                 writeups and generated study reports
+miri_harnesses/         active targeted Miri harnesses used by the study
+evidence/               archived Geiger, Miri, and fuzz artifacts
+docs/                   report and proposal materials
+fuzz_harnesses/         active extracted fuzz harnesses
 scripts/                thin wrappers around the manifest runner
 ```
 

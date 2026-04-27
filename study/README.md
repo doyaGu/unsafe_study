@@ -2,6 +2,9 @@
 
 `study/manifest.toml` is the canonical manifest for the 12-crate study.
 
+For a full end-to-end execution runbook, see
+[FULL_RUN_GUIDE.md](/home/touyou/workspace/unsafe_study/study/FULL_RUN_GUIDE.md).
+
 The protocol is executed natively by passing the manifest path to
 `unsafe-audit`:
 

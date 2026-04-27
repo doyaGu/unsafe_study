@@ -8,7 +8,7 @@ Last updated: 2026-04-25
 - The previous one-shot four-phase workflow remains available through `--classic`.
 - The codebase is now library-first: the CLI is thin, while discovery, phase execution, report modeling, rendering, coverage mapping, exploration, and study execution live in testable library modules.
 - All Rust modules build and run under the current test suite.
-- Study data for 12 crates is archived in `geiger_reports/`, `miri_reports/`, and `fuzz_findings/`.
+- Study data for 12 crates is archived in `evidence/geiger/`, `evidence/miri/`, and `evidence/fuzz/findings/`.
 - `study/manifest.toml` is now the canonical 12-crate study protocol, and `unsafe-audit` treats a manifest file path as a native study input.
 - `README.md` and `DESIGN.md` describe the tool as a multi-evidence auditing system, not as a proof, invariant-recovery, TCB-measurement, or exploitability analyzer.
 
@@ -29,7 +29,7 @@ Last updated: 2026-04-25
 - Exploration scheduler over the root-crate unsafe-site universe
 - Optional external LLM provider integration for auditable harness patch drafts; the tool records drafts but does not modify target crates automatically
 - Native manifest-driven study runner with normalized shared, Miri, and fuzz output layers
-- External `extensions_harness` tests for additional Miri/API coverage
+- External `miri_harnesses` tests for additional Miri/API coverage
 - Study results for 12 crates
 
 ## Not Done

@@ -20,6 +20,8 @@ targets/
 **/fuzz/artifacts/
 **/fuzz/coverage/
 **/fuzz/corpus/
+!evidence/fuzz/corpus/
+!evidence/fuzz/corpus/**
 
 # Logs and temp files
 *.log

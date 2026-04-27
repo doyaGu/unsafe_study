@@ -81,7 +81,7 @@ By default this is a single strict pass. With `--miri-triage`, the tool re-runs 
 
 This verdict is intentionally conservative. For example, `StrictOnlySuspectedFalsePositive` means the strict-only result looks model-sensitive under the current triage rule; it is not a code-level proof that the report is false.
 
-The result model also records the exact `cargo` args and working directory used for the run, because the study uses a mix of full upstream suites and targeted `extensions_harness` tests.
+The result model also records the exact `cargo` args and working directory used for the run, because the study uses a mix of full upstream suites and targeted `miri_harnesses` tests.
 
 ### Phase 3: Fuzz Run
 
