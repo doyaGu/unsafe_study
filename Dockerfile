@@ -42,7 +42,8 @@ RUN rustup toolchain install stable --profile minimal \
 
 RUN cargo +stable install cargo-geiger --locked \
     && cargo +stable install cargo-fuzz --locked \
-    && cargo miri setup
+    && cargo miri setup \
+    && rm -rf /root/.cache/miri
 
 WORKDIR /workspace/unsafe_study
 COPY . .
