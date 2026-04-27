@@ -1,0 +1,36 @@
+[package]
+name = "simd-json-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+simd-json = { path = "../../targets/simd-json" }
+
+[[bin]]
+name = "simd_json_borrowed_container_strings"
+path = "fuzz_targets/simd_json_borrowed_container_strings.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "simd_json_owned_escape_heavy_strings"
+path = "fuzz_targets/simd_json_owned_escape_heavy_strings.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "simd_json_tape_lazy_upgrade"
+path = "fuzz_targets/simd_json_tape_lazy_upgrade.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "simd_json_unaligned_input_offset"
+path = "fuzz_targets/simd_json_unaligned_input_offset.rs"
+test = false
+doc = false

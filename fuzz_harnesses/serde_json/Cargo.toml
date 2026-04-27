@@ -17,3 +17,15 @@ name = "from_str"
 path = "fuzz_targets/from_str.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "stream_values"
+path = "fuzz_targets/stream_values.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "error_positions"
+path = "fuzz_targets/error_positions.rs"
+test = false
+doc = false

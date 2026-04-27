@@ -1,0 +1,4 @@
+[package]
+name = "demo"
+[features]
+default = ["a"]

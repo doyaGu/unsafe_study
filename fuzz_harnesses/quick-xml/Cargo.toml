@@ -1,0 +1,30 @@
+[package]
+name = "quick-xml-study-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+quick-xml = { path = "../../targets/quick-xml" }
+
+[[bin]]
+name = "quick_xml_read"
+path = "fuzz_targets/quick_xml_read.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "quick_xml_attributes"
+path = "fuzz_targets/quick_xml_attributes.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "quick_xml_ns_read"
+path = "fuzz_targets/quick_xml_ns_read.rs"
+test = false
+doc = false

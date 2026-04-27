@@ -1,0 +1,30 @@
+[package]
+name = "roxmltree-study-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+roxmltree = { path = "../../targets/roxmltree" }
+
+[[bin]]
+name = "roxmltree_children"
+path = "fuzz_targets/roxmltree_children.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "roxmltree_node_ids"
+path = "fuzz_targets/roxmltree_node_ids.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "roxmltree_positions"
+path = "fuzz_targets/roxmltree_positions.rs"
+test = false
+doc = false

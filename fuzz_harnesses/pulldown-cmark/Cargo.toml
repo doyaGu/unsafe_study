@@ -1,0 +1,30 @@
+[package]
+name = "pulldown-cmark-study-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+pulldown-cmark = { path = "../../targets/pulldown-cmark/pulldown-cmark" }
+
+[[bin]]
+name = "pulldown_cmark_parse"
+path = "fuzz_targets/pulldown_cmark_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "pulldown_cmark_events"
+path = "fuzz_targets/pulldown_cmark_events.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "pulldown_cmark_offsets"
+path = "fuzz_targets/pulldown_cmark_offsets.rs"
+test = false
+doc = false

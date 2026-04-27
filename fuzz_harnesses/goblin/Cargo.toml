@@ -1,0 +1,36 @@
+[package]
+name = "goblin-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+goblin = { path = "../../targets/goblin" }
+libfuzzer-sys = "0.4"
+
+[[bin]]
+name = "goblin_object_parse"
+path = "fuzz_targets/goblin_object_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "goblin_elf_parse"
+path = "fuzz_targets/goblin_elf_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "goblin_pe_parse"
+path = "fuzz_targets/goblin_pe_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "goblin_mach_parse"
+path = "fuzz_targets/goblin_mach_parse.rs"
+test = false
+doc = false

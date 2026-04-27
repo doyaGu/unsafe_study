@@ -1,0 +1,30 @@
+[package]
+name = "memchr-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+memchr = { path = "../../targets/memchr" }
+
+[[bin]]
+name = "memchr_unaligned_public"
+path = "fuzz_targets/memchr_unaligned_public.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "memchr_memmem_edges"
+path = "fuzz_targets/memchr_memmem_edges.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "memchr_offset_windows"
+path = "fuzz_targets/memchr_offset_windows.rs"
+test = false
+doc = false

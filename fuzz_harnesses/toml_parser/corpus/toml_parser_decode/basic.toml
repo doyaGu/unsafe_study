@@ -1,0 +1,3 @@
+title = "demo"
+path = 'tmp/file'
+comment = "line\nnext"

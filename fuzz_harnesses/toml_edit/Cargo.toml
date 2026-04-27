@@ -1,0 +1,30 @@
+[package]
+name = "toml-edit-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+toml_edit = { path = "../../targets/toml_edit" }
+
+[[bin]]
+name = "toml_edit_parse"
+path = "fuzz_targets/toml_edit_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "toml_edit_mutate"
+path = "fuzz_targets/toml_edit_mutate.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "toml_edit_roundtrip"
+path = "fuzz_targets/toml_edit_roundtrip.rs"
+test = false
+doc = false

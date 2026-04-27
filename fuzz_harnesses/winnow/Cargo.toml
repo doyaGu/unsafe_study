@@ -1,0 +1,30 @@
+[package]
+name = "winnow-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+winnow = { path = "../../targets/winnow" }
+
+[[bin]]
+name = "winnow_parse"
+path = "fuzz_targets/winnow_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "winnow_partial"
+path = "fuzz_targets/winnow_partial.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "winnow_pairs"
+path = "fuzz_targets/winnow_pairs.rs"
+test = false
+doc = false
