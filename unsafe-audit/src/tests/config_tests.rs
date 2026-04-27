@@ -239,3 +239,31 @@ fn selecting_missing_manifest_crate_is_an_error() {
     .unwrap_err();
     assert!(err.to_string().contains("selected no crates"));
 }
+
+#[test]
+fn profile_and_phase_selection_labels_live_with_config_types() {
+    assert_eq!(RunProfile::Smoke.label(), "smoke");
+    assert_eq!(RunProfile::Baseline.label(), "baseline");
+    assert_eq!(RunProfile::Full.label(), "full");
+
+    assert_eq!(
+        PhaseSelection {
+            scan: true,
+            geiger: false,
+            miri: true,
+            fuzz: false,
+        }
+        .label(),
+        "scan, miri"
+    );
+    assert_eq!(
+        PhaseSelection {
+            scan: false,
+            geiger: false,
+            miri: false,
+            fuzz: false,
+        }
+        .label(),
+        "-"
+    );
+}

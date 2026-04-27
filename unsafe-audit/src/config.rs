@@ -18,6 +18,16 @@ pub enum RunProfile {
     Full,
 }
 
+impl RunProfile {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Smoke => "smoke",
+            Self::Baseline => "baseline",
+            Self::Full => "full",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunPlan {
     pub name: String,
@@ -40,6 +50,30 @@ pub struct PhaseSelection {
     pub geiger: bool,
     pub miri: bool,
     pub fuzz: bool,
+}
+
+impl PhaseSelection {
+    pub fn label(self) -> String {
+        let mut labels = Vec::new();
+        if self.scan {
+            labels.push("scan");
+        }
+        if self.geiger {
+            labels.push("geiger");
+        }
+        if self.miri {
+            labels.push("miri");
+        }
+        if self.fuzz {
+            labels.push("fuzz");
+        }
+
+        if labels.is_empty() {
+            "-".into()
+        } else {
+            labels.join(", ")
+        }
+    }
 }
 
 impl Default for PhaseSelection {
