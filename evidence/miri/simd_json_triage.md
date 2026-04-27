@@ -2,7 +2,7 @@
 
 Date: 2026-03-11
 
-Harness: `miri_harnesses/tests/simd_json_triage.rs`
+Harness: `miri_harnesses/simd_json/tests/simd_json_triage.rs`
 
 Miri configuration used for classification:
 
@@ -106,8 +106,8 @@ Observed effect:
 
 - `tests/miri_triage.rs` becomes fully clean under
   `MIRIFLAGS='-Zmiri-strict-provenance'`
-- `miri_harnesses/tests/more_crates.rs` becomes fully clean under the same
-  flag, including `simd_json_parses_mutable_input`
+- the dedicated `miri_harnesses/simd_json/tests/simd_json_triage.rs` harness
+  becomes fully clean under the same flag
 - the historical lower-level direct test that called `parse_str_` twice with
   fresh `input.as_mut_ptr()` arguments failed and was kept as a diagnostic log
 - the current direct tests reuse one wrapper for both calls and are clean under

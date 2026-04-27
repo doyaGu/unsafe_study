@@ -37,6 +37,29 @@ The study assumes these directories already exist locally:
 - `miri_harnesses/`
 - `unsafe-audit/`
 
+### Required local patch for `simd-json`
+
+Before a formal rerun, apply the local compile-fix patch for
+`targets/simd-json`:
+
+```bash
+cd /home/seclab/unsafe_study/targets/simd-json
+git apply --check ../../patches/simd-json/0001-fix-nightly-unused-imports.patch
+git apply ../../patches/simd-json/0001-fix-nightly-unused-imports.patch
+```
+
+Why this is required today:
+
+- the pinned nightly toolchain surfaces five `unused_imports` / unused
+  re-export warnings in `simd-json 0.17.0`
+- the crate has `#![deny(warnings)]`, so those warnings become hard compile
+  errors
+- without this patch, the dedicated `miri_harnesses/simd_json` package cannot
+  build during the study rerun
+
+The patch is intentionally minimal and only fixes the compile break. It does
+not change parser logic or the targeted Miri cases.
+
 ### Toolchain
 
 The repository pins:
@@ -84,7 +107,7 @@ at least:
 - `python3` (recommended: `run_all.sh` uses it for binary-path discovery but can fall back to `cargo run`)
 - `jq` for report inspection
 
-The included [Dockerfile](/home/touyou/workspace/unsafe_study/Dockerfile:1)
+The included [Dockerfile](../Dockerfile)
 shows one known-good environment.
 
 ## Recommended Execution Order
@@ -124,6 +147,7 @@ Expected outcome:
 - the active toolchain is `nightly-2026-02-01`
 - `unsafe-audit` tests pass
 - `cargo geiger`, `cargo fuzz`, and `cargo miri` are installed
+- `targets/simd-json` has already had the local compile-fix patch applied
 
 ### 2. Dry run the manifest
 
@@ -137,8 +161,8 @@ bash scripts/run_all.sh --dry-run
 Expected outcome:
 
 - 12 crates appear in the plan
-- `serde_json` has its targeted `api_smoke` Miri cases
-- `simd-json` uses `miri_harnesses/tests/simd_json_triage.rs`
+- `serde_json` has its targeted per-crate Miri harness cases under `miri_harnesses/serde_json/`
+- `simd-json` uses `miri_harnesses/simd_json/tests/simd_json_triage.rs`
 - each crate shows at least one fuzz group
 
 ### 3. Run a full smoke pass first

@@ -7,7 +7,7 @@
 - `src/lib.rs` declares `#![forbid(unsafe_code)]`
 - Direct `unsafe` survey: ~1 source match, from crate-level attributes rather
   than an active unsafe block
-- Harness: `miri_harnesses/tests/more_crates.rs`
+- Harness: `miri_harnesses/roxmltree/tests/roxmltree.rs`
 
 ## Assessment
 

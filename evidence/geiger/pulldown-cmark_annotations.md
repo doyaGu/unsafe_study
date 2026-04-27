@@ -6,7 +6,7 @@
 - Local target: `targets/pulldown-cmark`
 - Direct `unsafe` survey: ~7 source matches
 - `src/lib.rs` forbids unsafe unless the optional `simd` feature is enabled
-- Harness: `miri_harnesses/tests/more_crates.rs`
+- Harness: `miri_harnesses/pulldown-cmark/tests/pulldown_cmark.rs`
 
 ## Main Unsafe Concentration
 

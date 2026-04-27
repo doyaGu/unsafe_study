@@ -635,7 +635,8 @@ reflect the definitive full-batch run.
 
 **Early-pass artifacts** (retained for methodological transparency):
 `evidence/miri/miri_harnesses.log`,
-`miri_harnesses/tests/api_smoke.rs`.
+the legacy monolithic `miri_harnesses` layout that has since been replaced by
+per-crate harness packages under `miri_harnesses/<crate>/`.
 
 ### 10.2 Results
 

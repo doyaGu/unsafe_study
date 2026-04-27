@@ -3,13 +3,19 @@
 `study/manifest.toml` is the canonical manifest for the 12-crate study.
 
 For a full end-to-end execution runbook, see
-[FULL_RUN_GUIDE.md](/home/touyou/workspace/unsafe_study/study/FULL_RUN_GUIDE.md).
+[FULL_RUN_GUIDE.md](FULL_RUN_GUIDE.md).
 
 The recommended Linux entrypoint is:
 
 ```bash
 bash scripts/run_all.sh
 ```
+
+Current rerun note: before a formal study rerun, apply
+`patches/simd-json/0001-fix-nightly-unused-imports.patch` to
+`targets/simd-json`. The pinned nightly toolchain currently turns five
+otherwise-benign `unused_imports` / unused re-export warnings into hard errors
+because upstream `simd-json 0.17.0` uses `#![deny(warnings)]`.
 
 That wrapper keeps execution pinned to this repository's `unsafe-audit` crate,
 resolves the emitted executable path from Cargo when possible, and falls back
@@ -67,6 +73,24 @@ Each `fuzz_group` describes one fuzz target set:
 
 The compact runner executes existing targets only. It does not generate new
 fuzz harnesses.
+
+Before launching a fuzz target, the runner now ensures that
+`targets/<crate>/fuzz/corpus/<target>/` exists. If that directory is empty and
+`fuzz_harnesses/<crate>/corpus/<target>/` exists, the runner copies the seed
+files from the per-crate `fuzz_harnesses` corpus store into the local crate
+corpus directory.
+
+Current runner behavior when local fuzz assets are incomplete:
+
+- missing or non-canonical `harness_dir` paths are treated as an empty target set
+- missing `fuzz/` workspaces or `cargo fuzz list` failures are recorded as `skipped`
+- explicit targets absent from the local workspace are recorded as `skipped`
+- per-target `cargo fuzz build` failures are recorded as fuzz `error` reports,
+  while the remaining targets in the same group continue to run
+
+This behavior was added during the 2026-04-27 rerun so the study can complete
+even when local `targets/<crate>/fuzz/` trees are incomplete or diverge from
+the intended manifest wiring.
 
 ## Environment Merge Order
 
@@ -132,6 +156,17 @@ The top-level report includes execution metadata:
 - `miri_triage`
 - `fuzz_time`
 - `fuzz_env`
+
+## Scan Robustness
+
+The static scan walks `*.rs` files under each crate root, excluding `target/`,
+`.git/`, `fuzz/`, `vendor/`, and `.cargo/` directories.
+
+If an individual Rust file is unreadable by `syn::parse_file`, the runner now
+emits a warning and skips that file instead of aborting the entire crate scan.
+This was needed for the 2026-04-27 rerun because
+`targets/memchr/benchmarks/haystacks/code/rust-library.rs` is not a normal
+crate compilation unit even though it has an `.rs` extension.
 
 ## Examples
 

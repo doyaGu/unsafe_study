@@ -1,0 +1,47 @@
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -44,7 +44,6 @@ mod numberparse;
+ mod safer_unchecked;
+ mod stringparse;
+ 
+-use macros::static_cast_u64;
+ use safer_unchecked::GetSaferUnchecked;
+ use stage2::StackState;
+ use tape::Value;
+--- a/src/numberparse/correct.rs
++++ b/src/numberparse/correct.rs
+@@ -9,6 +9,5 @@ use crate::StaticNode;
+ use crate::charutils::is_structural_or_whitespace;
+ use crate::error::Error;
+-use crate::macros::{static_cast_i64, unlikely};
+ use crate::safer_unchecked::GetSaferUnchecked;
+ use crate::{Deserializer, ErrorType, Result};
+ 
+--- a/src/stage2.rs
++++ b/src/stage2.rs
+@@ -1,7 +1,6 @@
+ #![allow(dead_code)]
+ use crate::charutils::is_not_structural_or_whitespace;
+-use crate::macros::unlikely;
+ use crate::safer_unchecked::GetSaferUnchecked;
+ use crate::value::tape::Node;
+ use crate::{Deserializer, Error, ErrorType, InternalError, Result};
+ use value_trait::StaticNode;
+--- a/src/macros.rs
++++ b/src/macros.rs
+@@ -1217,7 +1217,6 @@ macro_rules! unlikely {
+     }};
+ }
+ 
+-pub(crate) use unlikely;
+ 
+ /// static cast to an i32
+ #[allow(unused_macros)]
+@@ -1253,7 +1252,6 @@ macro_rules! static_cast_u64 {
+     };
+ }
+-pub(crate) use static_cast_u64;
+ 
+ /// Custom `try!` macro that does no `From` conversions
+ ///
+ /// FROM serde-json

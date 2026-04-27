@@ -6,8 +6,7 @@
 - Local target: `targets/simd-json`
 - Direct `unsafe` survey: ~504 `unsafe` source matches
 - Harnesses:
-  - `miri_harnesses/tests/more_crates.rs`
-  - `miri_harnesses/tests/simd_json_triage.rs`
+  - `miri_harnesses/simd_json/tests/simd_json_triage.rs`
   - `targets/simd-json/tests/miri_triage.rs`
 
 ## Main Unsafe Concentration

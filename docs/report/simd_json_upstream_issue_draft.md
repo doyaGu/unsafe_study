@@ -88,7 +88,7 @@ Two local changes were enough to make the active `simd-json` Miri repros pass:
 After that:
 
 - `targets/simd-json/tests/miri_triage.rs` passed fully under Miri
-- `miri_harnesses/tests/simd_json_triage.rs` passed fully under Miri
+- `miri_harnesses/simd_json/tests/simd_json_triage.rs` passed fully under Miri
 - the low-level `src/tests.rs` `parse_str_store_in_tuple*` tests also passed
   once they reused one input wrapper per buffer
 

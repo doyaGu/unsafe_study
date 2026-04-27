@@ -7,7 +7,7 @@
 - `src/lib.rs` declares `#![forbid(unsafe_code)]`
 - Direct `unsafe` survey: ~10 source matches, all comments / notes rather than
   live unsafe blocks
-- Harness: `miri_harnesses/tests/more_crates.rs`
+- Harness: `miri_harnesses/quick-xml/tests/quick_xml.rs`
 
 ## Assessment
 

@@ -7,32 +7,55 @@ The canonical source of truth for the current study set is
 "latest" crate versions or described the intake process without the final
 manifest wiring.
 
+Unless otherwise noted, the `Fuzz harness` column below describes the intended
+study wiring. The resolved source mapping and the actual local checkout state
+used during the 2026-04-27 rerun are recorded separately under
+`Resolved Source Mapping And Local Target State`.
+
 ### Selected Crates
 
 | Crate | Version | Cohort | Coverage tier | Domain | Miri harness | Fuzz harness |
 |-------|---------|--------|---------------|--------|--------------|--------------|
 | `httparse` | `1.10.1` | baseline | tier1 | HTTP/1.1 parsing | crate-local `cargo miri test` (`upstream_full`) | crate-local `targets/httparse/fuzz/` with `parse_chunk_size`, `parse_headers`, `parse_request`, `parse_request_multspaces`, `parse_response`, `parse_response_multspaces` |
-| `serde_json` | `1.0.149` | baseline | tier1 | JSON parsing / deserialization | crate-local `upstream_full` plus `miri_harnesses/tests/api_smoke.rs` (`serde_json_streams_multiple_values`, `serde_json_handles_escape_and_number_edges`) | crate-local `targets/serde_json/fuzz/`, all targets |
-| `bstr` | `1.12.1` | baseline | tier1 | Byte-string processing | crate-local `upstream_full` plus `miri_harnesses/tests/api_smoke.rs` (`bstr_ascii_boundary_offsets`, `bstr_invalid_utf8_search_and_trim`, `bstr_grapheme_iteration_and_reverse_search`) | crate-local `targets/bstr/fuzz/`, all targets |
-| `memchr` | `2.8.0` | extension | tier2 | Byte / substring search | `miri_harnesses/tests/api_smoke.rs` (`memchr_handles_unaligned_public_inputs`, `memchr_memmem_handles_edge_needles`) | crate-local `targets/memchr/fuzz/`, all targets |
-| `winnow` | `0.7.14` | extension | tier2 | Parser combinators | `miri_harnesses/tests/api_smoke.rs` (`winnow_parses_ascii_and_unicode_boundaries`, `winnow_handles_partial_numeric_and_whitespace_input`, `winnow_parses_nested_delimited_segments`) | crate-local `targets/winnow/fuzz/` with `winnow_parse`, `winnow_partial`, `winnow_pairs` |
-| `toml_parser` | `1.0.9+spec-1.1.0` | extension | tier2 | TOML lexing / parsing | `miri_harnesses/tests/api_smoke.rs` (`toml_parser_lexes_and_parses_nested_inputs`, `toml_parser_handles_multiline_strings`, `toml_parser_tracks_invalid_escape_errors`) | crate-local `targets/toml_parser/fuzz/` with `toml_parser_parse`, `toml_parser_decode`, `toml_parser_value` |
-| `simd-json` | `0.17.0` | extension | tier2 | SIMD JSON parsing | `miri_harnesses/tests/simd_json_triage.rs` (`simd_json_borrowed_value_parses_object_with_strings`, `simd_json_owned_value_parses_object_with_strings`, `simd_json_tape_exposes_numeric_array`, `simd_json_borrowed_value_handles_unaligned_input_offset`, `simd_json_borrowed_value_parses_number_heavy_document`, `simd_json_owned_value_parses_escape_heavy_strings`) | crate-local `targets/simd-json/fuzz/`, all targets |
-| `quick-xml` | `0.39.2` | extension | tier2 | Streaming XML reader / writer | `miri_harnesses/tests/more_crates.rs` (`quick_xml_streams_events`, `quick_xml_handles_attributes_and_namespaces`) | crate-local `targets/quick-xml/fuzz/` with `quick_xml_read`, `quick_xml_attributes`, `quick_xml_ns_read` |
-| `goblin` | `0.10.5` | extension | tier2 | ELF / PE / Mach-O parsing | `miri_harnesses/tests/more_crates.rs` (`goblin_parses_minimal_object_bytes`, `goblin_parses_minimal_pe_bytes`) | crate-local `targets/goblin/fuzz/` with `goblin_object_parse`, `goblin_elf_parse`, `goblin_pe_parse`, `goblin_mach_parse` |
-| `toml_edit` | `0.25.4+spec-1.1.0` | extension | tier2 | Format-preserving TOML parse/edit | `miri_harnesses/tests/more_crates.rs` (`toml_edit_parses_and_mutates_document`, `toml_edit_roundtrips_nested_mutations`) | crate-local `targets/toml_edit/fuzz/` with `toml_edit_parse`, `toml_edit_mutate`, `toml_edit_roundtrip` |
-| `pulldown-cmark` | `0.13.1` | extension | tier2 | Markdown parsing / rendering | `miri_harnesses/tests/more_crates.rs` (`pulldown_cmark_renders_html`, `pulldown_cmark_renders_nested_structures`) | crate-local `targets/pulldown-cmark/fuzz/` with `pulldown_cmark_parse`, `pulldown_cmark_events`, `pulldown_cmark_offsets` |
-| `roxmltree` | `0.21.1` | extension | tier2 | Read-only XML tree parsing | `miri_harnesses/tests/more_crates.rs` (`roxmltree_builds_tree`, `roxmltree_handles_namespaces_and_text`) | crate-local `targets/roxmltree/fuzz/` with `roxmltree_parse`, `roxmltree_traverse`, `roxmltree_options` |
+| `serde_json` | `1.0.149` | baseline | tier1 | JSON parsing / deserialization | crate-local `upstream_full` plus `miri_harnesses/serde_json/tests/serde_json.rs` (`serde_json_streams_multiple_values`, `serde_json_handles_escape_and_number_edges`) | crate-local `targets/serde_json/fuzz/`, all targets |
+| `bstr` | `1.12.1` | baseline | tier1 | Byte-string processing | crate-local `upstream_full` plus `miri_harnesses/bstr/tests/bstr.rs` (`bstr_ascii_boundary_offsets`, `bstr_invalid_utf8_search_and_trim`, `bstr_grapheme_iteration_and_reverse_search`) | crate-local `targets/bstr/fuzz/`, all targets |
+| `memchr` | `2.8.0` | extension | tier2 | Byte / substring search | `miri_harnesses/memchr/tests/memchr.rs` (`memchr_handles_unaligned_public_inputs`, `memchr_memmem_handles_edge_needles`) | crate-local `targets/memchr/fuzz/`, all targets |
+| `winnow` | `0.7.14` | extension | tier2 | Parser combinators | `miri_harnesses/winnow/tests/winnow.rs` (`winnow_parses_ascii_and_unicode_boundaries`, `winnow_handles_partial_numeric_and_whitespace_input`, `winnow_parses_nested_delimited_segments`) | crate-local `targets/winnow/fuzz/` with `winnow_parse`, `winnow_partial`, `winnow_pairs` |
+| `toml_parser` | `1.0.9+spec-1.1.0` | extension | tier2 | TOML lexing / parsing | `miri_harnesses/toml_parser/tests/toml_parser.rs` (`toml_parser_lexes_and_parses_nested_inputs`, `toml_parser_handles_multiline_strings`, `toml_parser_tracks_invalid_escape_errors`) | crate-local `targets/toml_parser/fuzz/` with `toml_parser_parse`, `toml_parser_decode`, `toml_parser_value` |
+| `simd-json` | `0.17.0` | extension | tier2 | SIMD JSON parsing | `miri_harnesses/simd_json/tests/simd_json_triage.rs` (`simd_json_borrowed_value_parses_object_with_strings`, `simd_json_owned_value_parses_object_with_strings`, `simd_json_tape_exposes_numeric_array`, `simd_json_borrowed_value_handles_unaligned_input_offset`, `simd_json_borrowed_value_parses_number_heavy_document`, `simd_json_owned_value_parses_escape_heavy_strings`) | crate-local `targets/simd-json/fuzz/`, all targets |
+| `quick-xml` | `0.39.2` | extension | tier2 | Streaming XML reader / writer | `miri_harnesses/quick-xml/tests/quick_xml.rs` (`quick_xml_streams_events`, `quick_xml_handles_attributes_and_namespaces`) | crate-local `targets/quick-xml/fuzz/` with `quick_xml_read`, `quick_xml_attributes`, `quick_xml_ns_read` |
+| `goblin` | `0.10.5` | extension | tier2 | ELF / PE / Mach-O parsing | `miri_harnesses/goblin/tests/goblin.rs` (`goblin_parses_minimal_object_bytes`, `goblin_parses_minimal_pe_bytes`) | crate-local `targets/goblin/fuzz/` with `goblin_object_parse`, `goblin_elf_parse`, `goblin_pe_parse`, `goblin_mach_parse` |
+| `toml_edit` | `0.25.4+spec-1.1.0` | extension | tier2 | Format-preserving TOML parse/edit | `miri_harnesses/toml_edit/tests/toml_edit.rs` (`toml_edit_parses_and_mutates_document`, `toml_edit_roundtrips_nested_mutations`) | crate-local `targets/toml_edit/fuzz/` with `toml_edit_parse`, `toml_edit_mutate`, `toml_edit_roundtrip` |
+| `pulldown-cmark` | `0.13.1` | extension | tier2 | Markdown parsing / rendering | `miri_harnesses/pulldown-cmark/tests/pulldown_cmark.rs` (`pulldown_cmark_renders_html`, `pulldown_cmark_renders_nested_structures`) | crate-local `targets/pulldown-cmark/fuzz/` with `pulldown_cmark_parse`, `pulldown_cmark_events`, `pulldown_cmark_offsets` |
+| `roxmltree` | `0.21.1` | extension | tier2 | Read-only XML tree parsing | `miri_harnesses/roxmltree/tests/roxmltree.rs` (`roxmltree_builds_tree`, `roxmltree_handles_namespaces_and_text`) | crate-local `targets/roxmltree/fuzz/` with `roxmltree_parse`, `roxmltree_traverse`, `roxmltree_options` |
 
 ### Harness Files
 
 | Harness file | Role | Crates covered |
 |--------------|------|----------------|
 | `targets/<crate>/` | Full upstream Miri suite in the crate's own test tree | `httparse`, `serde_json`, `bstr` |
-| `miri_harnesses/tests/api_smoke.rs` | Targeted API-level Miri probes for baseline follow-ups and parser/search extension crates | `serde_json`, `bstr`, `memchr`, `winnow`, `toml_parser` |
-| `miri_harnesses/tests/simd_json_triage.rs` | Dedicated `simd-json` Miri triage cases | `simd-json` |
-| `miri_harnesses/tests/more_crates.rs` | Targeted Miri probes for the remaining extension crates | `quick-xml`, `goblin`, `toml_edit`, `pulldown-cmark`, `roxmltree` |
+| `miri_harnesses/<crate>/tests/*.rs` | Dedicated per-crate targeted Miri probes, one harness package per study crate | `serde_json`, `bstr`, `memchr`, `winnow`, `toml_parser`, `simd-json`, `quick-xml`, `goblin`, `toml_edit`, `pulldown-cmark`, `roxmltree` |
 | `targets/<crate>/fuzz/` | Crate-local `cargo-fuzz` workspace used by the fuzz phase | all 12 selected crates |
+
+### Resolved Source Mapping And Local Target State
+
+The 2026-04-27 rerun resolved the current `targets/` sources and local fuzz
+workspace state as follows.
+
+| Crate | Resolved source | Current local fuzz state | Notes from 2026-04-27 rerun |
+|-------|-----------------|--------------------------|-----------------------------|
+| `httparse` | `seanmonstar/httparse` tag `v1.10.1` | workspace present; study target names present | full/smoke reruns built and attempted all configured fuzz targets |
+| `serde_json` | `serde-rs/json` tag `v1.0.149` | workspace present; only `from_slice` discovered in current checkout | the 2026-04-27 manifest-driven rerun only discovered `from_slice` in the current checkout |
+| `bstr` | `BurntSushi/bstr` tag `1.12.1` | no discoverable fuzz targets in current checkout | fuzz phase was recorded as `skipped` in the full rerun |
+| `memchr` | `BurntSushi/memchr` tag `v2.8.0` | workspace present; upstream target set discovered (`memchr`, `memchr2`, `memchr3`, `memmem`, `memrchr`, `memrchr2`, `memrchr3`, `memrmem`) | scan needed one parser skip for `benchmarks/haystacks/code/rust-library.rs` |
+| `winnow` | `winnow-rs/winnow` tag `v0.7.14` | workspace present; current upstream target is `fuzz_arithmetic` | study-specific names `winnow_parse`, `winnow_partial`, and `winnow_pairs` were absent, so the fuzz group was recorded as `skipped` |
+| `toml_parser` | `toml-rs/toml` tag `toml_parser-v1.0.9`, package `crates/toml_parser` | no local `fuzz/` workspace | fuzz phase was recorded as `skipped` |
+| `simd-json` | `simd-lite/simd-json` tag `v0.17.0` | workspace present; discovered targets were `failing`, `fuzz_target_1`, `passing`, and `real` | all discovered targets hit `cargo fuzz build` errors during the full rerun |
+| `quick-xml` | `tafia/quick-xml` tag `v0.39.2` | workspace present; current targets do not match study-specific names | configured names `quick_xml_read`, `quick_xml_attributes`, and `quick_xml_ns_read` were absent, so the fuzz group was recorded as `skipped` |
+| `goblin` | crates.io `goblin 0.10.5`, repository field `m4b/goblin` | no local `fuzz/` workspace | the upstream git repository did not expose a matching `0.10.5` tag during source resolution |
+| `toml_edit` | `toml-rs/toml` tag `v0.25.4`, package `crates/toml_edit` | no local `fuzz/` workspace | fuzz phase was recorded as `skipped` |
+| `pulldown-cmark` | `pulldown-cmark/pulldown-cmark` tag `v0.13.1` | workspace present; current upstream targets do not match study-specific names | configured names `pulldown_cmark_parse`, `pulldown_cmark_events`, and `pulldown_cmark_offsets` were absent, so the fuzz group was recorded as `skipped` |
+| `roxmltree` | `RazrFalcon/roxmltree` tag `v0.21.1` | workspace present; study-specific names present (`roxmltree_parse`, `roxmltree_traverse`, `roxmltree_options`) | all three configured targets built and were executed during smoke/full reruns |
 
 ### Selection Notes
 

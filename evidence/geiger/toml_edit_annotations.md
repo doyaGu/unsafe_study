@@ -5,7 +5,7 @@
 - Version studied: `0.25.4+spec-1.1.0`
 - Local target: `targets/toml_edit`
 - Direct `unsafe` survey in `src/`: 0 matches
-- Harness: `miri_harnesses/tests/more_crates.rs`
+- Harness: `miri_harnesses/toml_edit/tests/toml_edit.rs`
 
 ## Assessment
 

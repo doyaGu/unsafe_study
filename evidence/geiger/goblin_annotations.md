@@ -5,7 +5,7 @@
 - Version studied: `0.10.5`
 - Local target: `targets/goblin`
 - Direct `unsafe` survey: ~36 `unsafe` source matches
-- Harness: `miri_harnesses/tests/more_crates.rs`
+- Harness: `miri_harnesses/goblin/tests/goblin.rs`
 
 ## Main Unsafe Concentration
 
