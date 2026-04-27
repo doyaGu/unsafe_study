@@ -8,8 +8,6 @@ The canonical study covers **12 crates**; the protocol is defined in [study/mani
 
 ## Study cohort
 
-## Study cohort
-
 | Crate | Domain |
 |-------|--------|
 | [httparse](targets/httparse) | HTTP/1.x parser |
@@ -45,7 +43,7 @@ cd targets/simd-json && git apply ../../patches/simd-json/0001-fix-nightly-unuse
 
 bash scripts/run_all.sh --profile smoke --jobs 4 --output /tmp/smoke-out   # quick validation
 bash scripts/run_all.sh --profile full  --jobs 4 --output /tmp/full-out    # canonical study
-bash scripts/run_all.sh --dry-run                                           # print plan only
+bash scripts/run_all.sh --dry-run                                          # print plan only
 ```
 
 ---
@@ -90,7 +88,7 @@ All four phases are independent and individually skippable.
 
 ```bash
 bash scripts/run_all.sh [flags]                          # recommended entrypoint
-cargo run --manifest-path unsafe-audit/Cargo.toml -- … # fallback
+cargo run --manifest-path unsafe-audit/Cargo.toml -- ... # fallback
 ```
 
 | Flag | Purpose |
