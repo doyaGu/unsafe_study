@@ -188,6 +188,7 @@ fn run_crate(
 fn status_label(status: report::PhaseStatus) -> &'static str {
     match status {
         report::PhaseStatus::Clean => "clean",
+        report::PhaseStatus::Pass => "pass",
         report::PhaseStatus::Finding => "finding",
         report::PhaseStatus::Skipped => "skipped",
         report::PhaseStatus::Error => "error",

@@ -20,6 +20,7 @@ pub enum PhaseKind {
 #[serde(rename_all = "snake_case")]
 pub enum PhaseStatus {
     Clean,
+    Pass,
     Finding,
     Skipped,
     Error,
@@ -226,10 +227,10 @@ pub fn render_markdown(report: &Report) -> String {
         md.push_str("| --- | --- | --- | --- | --- | --- |\n");
         for phase in &krate.phases {
             md.push_str(&format!(
-                "| {:?} | {} | {:?} | {} | {} | {} |\n",
-                phase.kind,
+                "| {} | {} | {} | {} | {} | {} |\n",
+                phase_kind_label(phase.kind),
                 phase.name,
-                phase.status,
+                phase_status_label(phase.status),
                 format!(
                     "{} ({} ms)",
                     phase.summary.replace('|', "\\|"),
@@ -319,6 +320,25 @@ fn phase_detail(phase: &PhaseReport) -> String {
     }
 }
 
+fn phase_kind_label(kind: PhaseKind) -> &'static str {
+    match kind {
+        PhaseKind::Scan => "scan",
+        PhaseKind::Geiger => "geiger",
+        PhaseKind::Miri => "miri",
+        PhaseKind::Fuzz => "fuzz",
+    }
+}
+
+fn phase_status_label(status: PhaseStatus) -> &'static str {
+    match status {
+        PhaseStatus::Clean => "clean",
+        PhaseStatus::Pass => "pass",
+        PhaseStatus::Finding => "finding",
+        PhaseStatus::Skipped => "skipped",
+        PhaseStatus::Error => "error",
+    }
+}
+
 fn profile_label(profile: RunProfile) -> &'static str {
     match profile {
         RunProfile::Smoke => "smoke",
@@ -363,6 +383,11 @@ fn phase_cell(phases: &[PhaseReport], kind: PhaseKind) -> String {
         .any(|p| matches!(p.status, PhaseStatus::Error))
     {
         "error".into()
+    } else if relevant
+        .iter()
+        .any(|p| matches!(p.status, PhaseStatus::Pass))
+    {
+        "pass".into()
     } else if relevant
         .iter()
         .any(|p| matches!(p.status, PhaseStatus::Clean))
@@ -578,6 +603,95 @@ mod tests {
     }
 
     #[test]
+    fn overview_marks_pass_when_fuzz_hits_budget_cleanly() {
+        let report = Report {
+            schema_version: 1,
+            study_name: "s".into(),
+            execution: test_execution(),
+            crates: vec![CrateReport {
+                name: "demo".into(),
+                path: "demo".into(),
+                cohort: None,
+                unsafe_sites: Vec::new(),
+                pattern_summary: PatternSummary::default(),
+                phases: vec![PhaseReport {
+                    kind: PhaseKind::Fuzz,
+                    name: "fg.parse".into(),
+                    status: PhaseStatus::Pass,
+                    command: Vec::new(),
+                    duration_ms: 0,
+                    log_path: None,
+                    summary: "target parse, budget 30s, 123 runs, pass (reached budget limit without findings)".into(),
+                    evidence: PhaseEvidence::Fuzz {
+                        target: Some("parse".into()),
+                        budget_secs: Some(30),
+                        artifact: None,
+                        error_kind: None,
+                        runs: Some(123),
+                        excerpt: None,
+                    },
+                }],
+                review_priority: Vec::new(),
+            }],
+        };
+        assert!(render_markdown(&report).contains("| demo | 0 | - | - | pass |"));
+    }
+
+    #[test]
+    fn overview_prefers_pass_over_clean_for_mixed_fuzz_results() {
+        let report = Report {
+            schema_version: 1,
+            study_name: "s".into(),
+            execution: test_execution(),
+            crates: vec![CrateReport {
+                name: "demo".into(),
+                path: "demo".into(),
+                cohort: None,
+                unsafe_sites: Vec::new(),
+                pattern_summary: PatternSummary::default(),
+                phases: vec![
+                    PhaseReport {
+                        kind: PhaseKind::Fuzz,
+                        name: "fg.fast".into(),
+                        status: PhaseStatus::Clean,
+                        command: Vec::new(),
+                        duration_ms: 0,
+                        log_path: None,
+                        summary: "target fast, budget 30s, clean".into(),
+                        evidence: PhaseEvidence::Fuzz {
+                            target: Some("fast".into()),
+                            budget_secs: Some(30),
+                            artifact: None,
+                            error_kind: None,
+                            runs: Some(50),
+                            excerpt: None,
+                        },
+                    },
+                    PhaseReport {
+                        kind: PhaseKind::Fuzz,
+                        name: "fg.deep".into(),
+                        status: PhaseStatus::Pass,
+                        command: Vec::new(),
+                        duration_ms: 0,
+                        log_path: None,
+                        summary: "target deep, budget 30s, 123 runs, pass (reached budget limit without findings)".into(),
+                        evidence: PhaseEvidence::Fuzz {
+                            target: Some("deep".into()),
+                            budget_secs: Some(30),
+                            artifact: None,
+                            error_kind: None,
+                            runs: Some(123),
+                            excerpt: None,
+                        },
+                    },
+                ],
+                review_priority: Vec::new(),
+            }],
+        };
+        assert!(render_markdown(&report).contains("| demo | 0 | - | - | pass |"));
+    }
+
+    #[test]
     fn markdown_includes_execution_metadata() {
         let report = Report {
             schema_version: 1,
@@ -630,5 +744,41 @@ mod tests {
         assert!(md.contains("error_kind=environment_error"));
         assert!(md.contains("artifact=/tmp/crash-1"));
         assert!(md.contains("runs=123"));
+    }
+
+    #[test]
+    fn markdown_uses_lowercase_phase_labels() {
+        let report = Report {
+            schema_version: 1,
+            study_name: "study".into(),
+            execution: test_execution(),
+            crates: vec![CrateReport {
+                name: "demo".into(),
+                path: "demo".into(),
+                cohort: None,
+                unsafe_sites: Vec::new(),
+                pattern_summary: PatternSummary::default(),
+                phases: vec![PhaseReport {
+                    kind: PhaseKind::Fuzz,
+                    name: "fg.parse".into(),
+                    status: PhaseStatus::Pass,
+                    command: Vec::new(),
+                    duration_ms: 31_000,
+                    log_path: Some("/tmp/fuzz.log".into()),
+                    summary: "target parse, budget 30s, 123 runs, pass (reached budget limit without findings)".into(),
+                    evidence: PhaseEvidence::Fuzz {
+                        target: Some("parse".into()),
+                        budget_secs: Some(30),
+                        artifact: None,
+                        error_kind: None,
+                        runs: Some(123),
+                        excerpt: None,
+                    },
+                }],
+                review_priority: Vec::new(),
+            }],
+        };
+        let md = render_markdown(&report);
+        assert!(md.contains("| fuzz | fg.parse | pass |"));
     }
 }

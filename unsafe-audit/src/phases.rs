@@ -179,7 +179,11 @@ fn run_miri_case(
         "ub_observed" | "strict_only_ub" => PhaseStatus::Finding,
         _ => PhaseStatus::Error,
     };
-    let category = classify_ub(&combined_log);
+    let category = if matches!(status, PhaseStatus::Finding) {
+        classify_ub(&combined_log)
+    } else {
+        None
+    };
 
     Ok(PhaseReport {
         kind: PhaseKind::Miri,
@@ -1037,7 +1041,11 @@ fn classify_ub(output: &str) -> Option<String> {
 
 fn classify_fuzz_status(output: &CommandOutput) -> PhaseStatus {
     if output.success {
-        return PhaseStatus::Clean;
+        return if fuzz_reached_budget(&output.combined_output) {
+            PhaseStatus::Pass
+        } else {
+            PhaseStatus::Clean
+        };
     }
     if is_lsan_ptrace_error(&output.combined_output) {
         return PhaseStatus::Error;
@@ -1058,7 +1066,7 @@ fn classify_fuzz_status(output: &CommandOutput) -> PhaseStatus {
 
 fn fuzz_error_kind(output: &CommandOutput, status: PhaseStatus) -> Option<String> {
     match status {
-        PhaseStatus::Clean | PhaseStatus::Skipped => None,
+        PhaseStatus::Clean | PhaseStatus::Pass | PhaseStatus::Skipped => None,
         PhaseStatus::Finding => Some("finding".into()),
         PhaseStatus::Error if is_lsan_ptrace_error(&output.combined_output) => {
             Some("environment_error".into())
@@ -1076,6 +1084,7 @@ fn fuzz_summary(
 ) -> String {
     let status_text = match status {
         PhaseStatus::Clean => "clean",
+        PhaseStatus::Pass => "pass (reached budget limit without findings)",
         PhaseStatus::Finding => "finding",
         PhaseStatus::Skipped => "skipped",
         PhaseStatus::Error if is_lsan_ptrace_error(output) => {
@@ -1092,6 +1101,7 @@ fn fuzz_summary(
 fn phase_status_label(status: PhaseStatus) -> &'static str {
     match status {
         PhaseStatus::Clean => "clean",
+        PhaseStatus::Pass => "pass",
         PhaseStatus::Finding => "finding",
         PhaseStatus::Skipped => "skipped",
         PhaseStatus::Error => "error",
@@ -1130,6 +1140,14 @@ fn parse_fuzz_runs(output: &str) -> Option<u64> {
         }
     }
     None
+}
+
+fn fuzz_reached_budget(output: &str) -> bool {
+    output.lines().any(|line| {
+        let line = line.trim();
+        line.strip_prefix("Done ")
+            .is_some_and(|rest| rest.contains(" runs in ") && rest.contains(" second(s)"))
+    })
 }
 
 fn artifact_snapshot(dir: &Path) -> BTreeMap<PathBuf, SystemTime> {
@@ -1264,6 +1282,19 @@ mod tests {
     }
 
     #[test]
+    fn fuzz_budget_stop_is_pass_not_clean() {
+        let output = CommandOutput {
+            success: true,
+            exit_code: Some(0),
+            duration_ms: 1,
+            combined_output: "Done 19313761 runs in 31 second(s)".into(),
+        };
+        assert_eq!(classify_fuzz_status(&output), PhaseStatus::Pass);
+        assert!(fuzz_reached_budget(&output.combined_output));
+        assert_eq!(fuzz_error_kind(&output, classify_fuzz_status(&output)), None);
+    }
+
+    #[test]
     fn fuzz_lsan_ptrace_failure_is_error_not_finding() {
         let output = CommandOutput {
             success: false,
@@ -1389,6 +1420,34 @@ mod tests {
     }
 
     #[test]
+    fn clean_miri_case_does_not_report_ub_category() {
+        let dir = tempdir().unwrap();
+        let mut plan = crate_plan(dir.path().into());
+        plan.miri_cases.push(MiriCasePlan {
+            name: "targeted".into(),
+            scope: "targeted".into(),
+            harness_dir: None,
+            test: Some("unaligned_public_inputs".into()),
+            case: None,
+            exact: false,
+        });
+        let executor = ScriptedExecutor::new(vec![output(
+            true,
+            "test unaligned_public_inputs ... ok\n\ntest result: ok. 1 passed; 0 failed",
+        )]);
+
+        let phases = run_miri_cases(&plan, false, dir.path(), &executor).unwrap();
+
+        match &phases[0].evidence {
+            PhaseEvidence::Miri { verdict, ub_category, .. } => {
+                assert_eq!(verdict, "clean");
+                assert_eq!(*ub_category, None);
+            }
+            _ => panic!("expected miri evidence"),
+        }
+    }
+
+    #[test]
     fn fuzz_all_discovers_targets_runs_each_and_parses_runs() {
         let dir = tempdir().unwrap();
         create_built_fuzz_binary(dir.path(), "parse");
@@ -1465,6 +1524,20 @@ mod tests {
         );
         assert!(summary.contains("environment error"));
         assert!(summary.contains("19313761 runs"));
+    }
+
+    #[test]
+    fn fuzz_summary_mentions_budget_limited_pass() {
+        let summary = fuzz_summary(
+            "parse",
+            30,
+            PhaseStatus::Pass,
+            Some(19313761),
+            "Done 19313761 runs in 31 second(s)",
+        );
+        assert!(summary.contains("19313761 runs"));
+        assert!(summary.contains("pass"));
+        assert!(summary.contains("budget limit"));
     }
 
     #[test]
@@ -1631,6 +1704,34 @@ mod tests {
 
         assert_eq!(phases.len(), 1);
         assert!(crate_dir.join("fuzz/corpus/parse").is_dir());
+    }
+
+    #[test]
+    fn fuzz_group_marks_budget_completion_as_pass() {
+        let dir = tempdir().unwrap();
+        create_built_fuzz_binary(dir.path(), "parse");
+        let mut plan = crate_plan(dir.path().into());
+        plan.fuzz_groups.push(FuzzGroupPlan {
+            name: "named".into(),
+            harness_dir: None,
+            all: false,
+            targets: vec!["parse".into()],
+            time: Some(3),
+            budget_label: Some("smoke".into()),
+            env: BTreeMap::new(),
+        });
+        let executor = ScriptedExecutor::new(vec![
+            output(true, "parse\n"),
+            output(true, "built parse"),
+            output(true, "Done 123 runs in 3 second(s)"),
+        ]);
+
+        let phases =
+            run_fuzz_groups(&plan, Some(9), 1, &BTreeMap::new(), dir.path(), &executor).unwrap();
+
+        assert_eq!(phases.len(), 1);
+        assert_eq!(phases[0].status, PhaseStatus::Pass);
+        assert!(phases[0].summary.contains("budget limit"));
     }
 
     #[test]
