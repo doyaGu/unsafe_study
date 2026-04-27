@@ -1,5 +1,5 @@
 #!/bin/bash
-# run_fuzz.sh — Run fuzzing on Linux (cargo-fuzz / libFuzzer).
+# run_fuzz.sh - Run fuzzing on Linux (cargo-fuzz / libFuzzer).
 #
 # Usage:
 #   bash scripts/run_fuzz.sh [crate] [target] [seconds]
@@ -139,7 +139,7 @@ run_fuzz_target() {
     local exit_code=${PIPESTATUS[0]}
 
     if [ $exit_code -ne 0 ]; then
-        echo "  CRASH FOUND — check $log_file and fuzz/artifacts/$target/"
+        echo "  CRASH FOUND - check $log_file and fuzz/artifacts/$target/"
 
         # Copy artifacts to findings directory
         if [ -d "$artifacts_dir" ] && [ "$(ls -A "$artifacts_dir")" ]; then
