@@ -11,6 +11,53 @@
 The tool is not the research result by itself. It is the experimental vehicle
 for producing comparable evidence across crates.
 
+## Current Status
+
+The compact refactor is no longer just a plan. The current implementation has
+already converged on the reduced study-runner shape:
+
+```text
+src/main.rs
+src/lib.rs
+src/config.rs
+src/runner.rs
+src/scan.rs
+src/phases.rs
+src/report.rs
+src/fs.rs
+```
+
+What is already implemented:
+
+- one normalized workflow for crate input and manifest input
+- AST-based unsafe inventory
+- compact pattern summary
+- Geiger / Miri / fuzz orchestration
+- Miri strict-vs-baseline triage
+- crate-level parallelism via `--jobs`
+- fuzz-target parallelism via `--fuzz-jobs`
+- `--profile smoke|baseline|full`
+- JSON + Markdown reports
+- explicit report execution metadata
+- fuzz `error_kind` classification
+- current-run-only fuzz artifact attribution
+- progress output with build/run state and elapsed/budget summaries
+
+What has already been removed from the core:
+
+- exploration scheduler
+- LLVM coverage replay/parsing
+- unsafe reach merging from coverage
+- LLM harness generation
+- resume/status/stop runtime management
+- old multi-layer render pipeline
+
+So the remaining work is no longer "replace the old system." It is mostly:
+
+- sharpen reporting and prioritization
+- improve study observability for long runs
+- keep the code size and behavior bounded
+
 The evidence chain should stay narrow:
 
 ```text

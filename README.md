@@ -1,232 +1,292 @@
-# unsafe_study -- Multi-Evidence Auditing of `unsafe` Rust Crates
+# unsafe_study
 
-CSE 5349 final project. The main deliverable is `unsafe-audit`, a Rust CLI that collects several complementary kinds of evidence about `unsafe` code in a crate.
+`unsafe_study` is a research project around one question:
 
-The project does **not** prove a crate safe or unsafe. Instead, it combines:
+> Can we build an evidence-driven workflow that identifies which Rust `unsafe`
+> sites exist, which ones are dynamically exercised, and which ones deserve
+> human review first?
 
-- a syntactic proxy for `unsafe` surface area,
-- heuristic pattern classification for `unsafe`-related code,
-- Miri signals on exercised test paths,
-- and observable failures from existing fuzz harnesses.
+The main executable deliverable is `unsafe-audit`, a local CLI that runs a
+compact study protocol over one crate or a manifest-defined crate cohort.
 
-That evidence is then reported together so a human auditor can interpret scope, severity, and remaining uncertainty.
+## Current Tool Shape
 
-## The Tool: `unsafe-audit`
+`unsafe-audit` is now a compact study runner, not the earlier exploration-heavy
+platform.
 
-A CLI tool that takes a crate path and runs the audit workflow:
+Unified workflow:
 
-```bash
-$ unsafe-audit ../targets/httparse --fuzz-time 60 --output /tmp/report
+```text
+input
+-> RunPlan
+-> per-crate execution
+-> scan / geiger / miri / fuzz
+-> structured evidence
+-> report.json + report.md
 ```
 
-### What It Does
+Input forms:
 
-| Phase | What it provides | Current implementation |
-|-------|-------------------|------------------------|
-| **1. Geiger scan** | A crate-local syntactic proxy for `unsafe` surface area | `geiger` library API over crate source files under `src/` |
-| **2. Miri test** | Execution-based UB signals on paths reached by tests | `cargo miri test`, with optional strict-vs-baseline triage, coarse UB categories, and triage summaries |
-| **3. Fuzz run** | Observable failures under existing fuzz harnesses | discovers existing `cargo fuzz` targets, records exit status, artifacts, and basic stats |
-| **4. Pattern analysis** | Heuristic classification of `unsafe`-related code shapes | `syn` AST visitor, finding kinds, pattern categories, and a risk score |
+```bash
+unsafe-audit path/to/crate --output out/
+unsafe-audit study/manifest.toml --output out/
+```
 
-### What It Does NOT Do
+A crate path becomes a single-crate `RunPlan`. A manifest file becomes a
+multi-crate study plan with normalized Miri cases and fuzz groups.
 
-- It does **not** prove the absence of UB.
-- It does **not** recover high-level invariants precisely.
-- It does **not** measure exploitability.
-- It does **not** auto-generate fuzz harnesses.
-- It does **not** auto-download crates from crates.io or git.
+## What `unsafe-audit` Does
 
-### How To Read The Results
+### 1. Unsafe Inventory
 
-The phases answer different questions:
+AST-based scan over local Rust sources using `syn`.
 
-- **Geiger**: how much `unsafe` syntax is present, and where?
-- **Pattern analysis**: what kinds of `unsafe`-adjacent operations appear?
-- **Miri**: did Miri report UB on the paths reached by tests?
-- **Fuzz**: do the available fuzz harnesses trigger visible failures?
+The current compact taxonomy records:
 
-The outputs are intentionally **evidence**, not verdicts. For example:
+- `unsafe_block`
+- `unsafe_fn`
+- `unsafe_impl`
+- `extern_block`
+- `ptr_op`
+- `transmute`
+- `unchecked_op`
+- `inline_asm`
 
-- A clean Miri run means no UB was observed on the exercised test paths, not that the crate is UB-free.
-- A clean fuzz run means no visible failure was found under the current harnesses and budget, not that the crate is robust against all inputs.
-- A high Geiger count means there is more `unsafe` syntax to inspect, not that the crate is necessarily less sound.
+The report stores a stable site id, file, line, kind, and compact pattern.
 
-## Pattern Analysis
+### 2. Geiger
 
-The AST analyzer emits structured findings. `FindingKind` distinguishes:
+Runs:
 
-- unsafe blocks,
-- unsafe function declarations,
-- unsafe impl declarations,
-- risky operations,
-- and extern items.
+```bash
+cargo geiger --output-format Json
+```
 
-`RiskyOperation` findings are classified into these categories:
+The current parser keeps a compact root/dependency unsafe summary plus full
+logs.
 
-| Pattern | Severity | Example |
-|---------|----------|---------|
-| `Transmute` | High | `std::mem::transmute::<u32, i32>(x)` |
-| `UninitMemory` | High | `std::mem::zeroed()`, `MaybeUninit::assume_init()` |
-| `UnreachableUnchecked` | High | `std::hint::unreachable_unchecked()` |
-| `InlineAsm` | High | `core::arch::asm!("mov {}, {}", ...)` |
-| `UncheckedConversion` | High | `str::from_utf8_unchecked(bytes)` |
-| `PtrDereference` | Medium | `*ptr`, `raw as *mut T` |
-| `PtrReadWrite` | Medium | `std::ptr::read(ptr)`, `ptr::copy_nonoverlapping` |
-| `UncheckedIndex` | Medium | `slice.get_unchecked(i)` |
-| `SimdIntrinsic` | Medium | `_mm_load_si128(...)`, `_mm256_cmpeq_epi8` |
-| `UnionAccess` | Medium | Reserved for future typed union-field detection |
-| `ExternBlock` | Medium | `extern "C" { fn malloc(size: usize); }` |
-| `AddrOf` | Low | `std::ptr::addr_of!(field)` |
-| `OtherUnsafe` | Low | unsafe block/declaration marker or uncategorized unsafe context |
+### 3. Miri
 
-Important limitation: these categories are **heuristic structural classifications**. They hint at the kinds of assumptions the code may rely on, but they do not reconstruct those assumptions precisely.
+Runs configured `cargo miri test` invocations from the manifest or the single
+crate default plan.
 
-Risk score is a heuristic summary computed from finding counts and severity weights. It is useful for rough prioritization, not as a security metric.
+Supported semantics:
 
-## Usage
+- full upstream suite
+- explicit `--test <target>`
+- case filter
+- `-- --exact`
+- harness working directory override
+- strict-vs-baseline triage
+
+Recorded evidence includes:
+
+- verdict
+- coarse UB category
+- summary
+- duration
+- log path
+
+### 4. Fuzz
+
+Runs existing fuzz targets only. The tool does not synthesize harnesses.
+
+Execution model:
+
+1. discover targets with `cargo fuzz list` or use manifest target list
+2. build each target with `cargo fuzz build`
+3. run built libFuzzer binaries directly
+4. optionally run multiple targets in parallel with `--fuzz-jobs`
+
+Recorded evidence includes:
+
+- status
+- target
+- budget
+- run count
+- artifact path
+- error kind
+- duration
+- log path
+
+Fuzz `error_kind` is now explicit:
+
+- `environment_error`
+- `tool_error`
+- `finding`
+
+Artifact attribution is also current-run only: historical `crash-*` files are
+not attached to a clean run.
+
+### 5. Report
+
+Each run writes:
+
+```text
+out/
+  report.json
+  report.md
+  crates/<crate>/logs/*.log
+```
+
+`report.json` includes:
+
+- top-level execution config
+- per-crate unsafe inventory
+- per-phase status and summary
+- phase-specific evidence
+- review-priority rows
+
+`report.md` includes:
+
+- execution config
+- study overview
+- per-crate unsafe inventory
+- dynamic evidence table
+- review priority
+
+## What `unsafe-audit` Does Not Do
+
+The current core intentionally does not include:
+
+- exploration scheduler
+- LLVM coverage replay/parsing
+- unsafe-site reach merging from coverage
+- resume/status/stop runtime management
+- LLM harness generation
+- crates.io/git acquisition
+- HTML reporting
+- soundness proof or exploitability analysis
+
+## CLI
+
+Build:
 
 ```bash
 cd unsafe-audit
 cargo build --release
-
-# Smoke test (Geiger + patterns only, no external tools needed)
-./target/release/unsafe-audit ../targets/httparse \
-  --skip-miri --skip-fuzz --output /tmp/smoke
-
-# Full run on one crate (needs Miri + cargo-fuzz installed)
-./target/release/unsafe-audit ../targets/httparse \
-  --fuzz-time 60 --output /tmp/full
-
-# Batch mode over all crates
-./target/release/unsafe-audit ../targets --batch \
-  --skip-fuzz --output /tmp/batch
-
-# List discovered crates without running
-./target/release/unsafe-audit ../targets --batch --list
-
-# Strict-vs-baseline Miri triage
-./target/release/unsafe-audit ../targets/serde_json \
-  --miri-triage --skip-fuzz --output /tmp/serde-triage
 ```
 
-CLI flags:
+Single crate:
+
+```bash
+./target/release/unsafe-audit ../targets/httparse \
+  --output /tmp/httparse-report
+```
+
+Study manifest:
+
+```bash
+./target/release/unsafe-audit ../study/manifest.toml \
+  --output /tmp/study-report
+```
+
+Dry run:
+
+```bash
+./target/release/unsafe-audit ../study/manifest.toml --dry-run
+```
+
+Useful flags:
 
 ```text
-PATH                          Crate dir, or parent dir with --batch
---batch                       Treat PATH as directory of crates
---skip-geiger                 Skip Phase 1
---skip-miri                   Skip Phase 2
---skip-fuzz                   Skip Phase 3
---skip-patterns               Skip Phase 4
---miri-flags <FLAGS>          MIRIFLAGS (default: strict provenance + symbolic alignment)
---miri-triage                 Re-run baseline Miri when strict Miri reports UB
---fuzz-time <SECONDS>         Per-target fuzz budget (default: 60)
---fuzz-env <KEY=VALUE>        Extra env vars for fuzz (repeatable)
---output <DIR>                Report output directory (default: <path>/unsafe-audit-report)
---format <json|markdown|both> Output format (default: both)
---list                        List crates, don't run
--v, --verbose                 Show pattern details
+--output <DIR>          Output directory
+--crates <A,B,...>      Restrict manifest input to selected crates
+--dry-run               Print normalized plan without running tools
+--skip-scan             Skip AST unsafe inventory
+--skip-geiger           Skip Geiger
+--skip-miri             Skip Miri
+--skip-fuzz             Skip fuzz
+--miri-triage           Re-run baseline Miri when strict Miri reports UB
+--fuzz-time <SECONDS>   Default fuzz time budget
+--fuzz-env KEY=VALUE    Extra env var for fuzz; repeatable
+--format <FORMAT>       `json` or `markdown`; repeatable
+--profile <PROFILE>     `smoke`, `baseline`, or `full`
+--jobs <N>              Parallelism across crates
+--fuzz-jobs <N>         Parallelism across fuzz targets within one crate
 ```
 
-## Output
+Profile semantics:
 
-Two files per run:
+- `smoke`: caps fuzz budget to `30s`
+- `baseline`: caps fuzz budget to `300s`
+- `full`: preserves requested/manifest budget
 
-- `report.json`: machine-readable structured evidence
-- `report.md`: human-readable summary with per-phase sections and a coarse cross-phase linkage section
-
-Representative fields in `report.json` include:
-
-- Geiger counts (`functions`, `exprs`, `item_impls`, ...)
-- Miri scope metadata, coarse UB category, strict/baseline run details, and triage summary
-- Fuzz scope, requested time budget, exit code, artifact path, run count, and edge coverage
-- Pattern findings, finding kinds, pattern counts, `total_findings`, and risk score
-
-The Markdown report also includes a coarse linkage summary that:
-
-- lists top hotspot files from static findings,
-- states Miri linkage only at recorded crate/test-scope granularity,
-- states fuzz linkage only at target granularity,
-- and labels any file-name match from Miri UB location text as best-effort and log-derived.
-
-## Study Results
-
-The repository includes study data and reports for 12 crates. Those artifacts should be read with the same interpretation rules above:
-
-- Geiger counts are a syntactic proxy for `unsafe` surface.
-- Miri findings apply to the test paths that actually executed.
-- Fuzz findings apply to the existing harnesses and budgets that were run.
-
-They are useful comparative evidence, but not complete security judgments.
-
-## Project Structure
+Single-crate fuzz runs also default to:
 
 ```text
-unsafe-audit/           # Main deliverable
-  src/
-    main.rs             # CLI entry, crate discovery, phase orchestration
-    analyzer.rs         # AST-based finding extraction and pattern classification
-    geiger.rs           # geiger library integration
-    miri.rs             # cargo miri runner + strict/baseline verdicts
-    fuzz.rs             # cargo-fuzz discovery, runner, exit/artifact capture
-    report_gen.rs       # JSON + Markdown report generation
-    models.rs           # Shared result types
-  Cargo.toml
-
-extensions_harness/     # Targeted smoke tests for Tier 2 crates
-fuzz_corpus/            # Seed corpora
-fuzz_findings/          # Fuzz artifacts
-geiger_reports/         # Archived geiger outputs + annotations
-miri_reports/           # Miri logs + triage notes
-report/                 # Final report + supporting writeups
-scripts/                # Original shell pipeline
-Dockerfile              # Reproducible environment
-demo_video.mp4          # Walkthrough video
+ASAN_OPTIONS=detect_leaks=0
 ```
 
-## Reproduce
+That avoids the current sandbox's `LeakSanitizer ... does not work under
+ptrace` noise.
 
-### Quick: Build and Smoke Test
+## Progress Output
+
+Long runs now print explicit progress to stderr:
+
+- crate start/done
+- geiger start/done
+- miri case start/done
+- fuzz group start/done
+- fuzz target build start/done
+- fuzz target run start
+- fuzz target final status with elapsed/budget
+
+Representative output:
+
+```text
+[1/1] crate httparse: fuzz start
+  fuzz group existing_targets: start
+    fuzz target parse_chunk_size: build start (budget 30s)
+    fuzz target parse_chunk_size: build done
+    fuzz target parse_chunk_size: run start (budget 30s)
+    fuzz target parse_chunk_size: clean (31.1s/30s)
+```
+
+## Study Protocol
+
+The canonical 12-crate protocol lives in:
+
+- [study/manifest.toml](study/manifest.toml)
+- [study/README.md](study/README.md)
+
+The shell wrapper [scripts/run_all.sh](scripts/run_all.sh) is only a thin
+wrapper around:
 
 ```bash
-cd unsafe-audit
-cargo build
-cargo run -- ../targets/httparse \
-  --skip-miri --skip-fuzz --output /tmp/smoke
-cat /tmp/smoke/report.md
+cargo run --manifest-path unsafe-audit/Cargo.toml -- study/manifest.toml
 ```
 
-### Full: One Crate With Miri + Fuzz
+## Repository Layout
 
-```bash
-# Prerequisites
-rustup toolchain install nightly-2026-02-01
-rustup component add miri rust-src --toolchain nightly-2026-02-01
-cargo install cargo-fuzz
-
-cd unsafe-audit
-cargo run -- ../targets/httparse \
-  --miri-triage \
-  --fuzz-time 60 \
-  --output /tmp/full
+```text
+unsafe-audit/           current CLI/library implementation
+study/                  manifest-driven research protocol
+targets/                local target crates
+extensions_harness/     extra Miri/fuzz harnesses used by the study
+report/                 writeups and generated study reports
+scripts/                thin wrappers around the manifest runner
 ```
 
-### Docker
+## Current Status
 
-```bash
-docker build -t unsafe-study .
-docker run --rm -it unsafe-study
-```
+The current compact implementation is centered on:
 
-## Toolchain
+- `unsafe-audit/src/main.rs`
+- `unsafe-audit/src/lib.rs`
+- `unsafe-audit/src/config.rs`
+- `unsafe-audit/src/runner.rs`
+- `unsafe-audit/src/scan.rs`
+- `unsafe-audit/src/phases.rs`
+- `unsafe-audit/src/report.rs`
+- `unsafe-audit/src/fs.rs`
 
-- Rust nightly-2026-02-01 (rustc 1.95.0-nightly)
-- Miri component + rust-src
-- cargo-fuzz (Phase 3)
-- Linux x86_64 for fuzzing; Miri works cross-platform
+Recent verified behavior:
 
-## Links
-
-- GitHub: https://github.com/doyaGu/unsafe_study
-- Full report: `report/final_report.md`
-- Tool design notes: `DESIGN.md`
+- `cargo test` passes
+- manifest-driven study execution works
+- crate-level parallelism works via `--jobs`
+- fuzz-target parallelism works via `--fuzz-jobs`
+- clean fuzz runs no longer inherit stale artifact paths
+- JSON and Markdown both expose execution config and fuzz error details
