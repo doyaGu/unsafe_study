@@ -1,5 +1,5 @@
 [package]
-name = "extensions_harness"
+name = "miri_harnesses"
 version = "0.1.0"
 edition = "2021"
 

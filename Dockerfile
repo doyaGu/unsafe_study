@@ -73,8 +73,8 @@ RUN cd /opt/unsafe_study/targets \
     && git clone --depth 1 https://github.com/toml-rs/toml.git toml_parser 2>/dev/null || true \
     && true
 
-# ── Build extensions_harness dependencies (warm build cache) ────────────
-RUN cd /opt/unsafe_study/extensions_harness && cargo check 2>/dev/null || true
+# ── Build miri_harnesses dependencies (warm build cache) ────────────
+RUN cd /opt/unsafe_study/miri_harnesses && cargo check 2>/dev/null || true
 
 # ── Default entrypoint ──────────────────────────────────────────────────
 # Run a short demo: Geiger + Miri on httparse only (fast, ~2 min).

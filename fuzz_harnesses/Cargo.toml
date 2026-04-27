@@ -1,0 +1,3 @@
+[workspace]
+members = ["bstr", "serde_json"]
+resolver = "2"

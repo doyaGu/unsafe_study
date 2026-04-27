@@ -18,7 +18,7 @@
   Skip the fuzzing phase.
 
 .PARAMETER ReportPath
-  Path for the final summary report (default: report/study_report.md).
+  Path for the final summary report (default: docs/report/study_report.md).
 #>
 [CmdletBinding()]
 param(
@@ -39,13 +39,12 @@ if ((Split-Path -Leaf $projectRoot) -ne "unsafe_study") {
   $projectRoot = Split-Path -Parent $PSCommandPath
 }
 $targetsDir   = Join-Path $projectRoot "targets"
-$geigerDir    = Join-Path $projectRoot "geiger_reports"
-$miriDir      = Join-Path $projectRoot "miri_reports"
-$fuzzTargDir  = Join-Path $projectRoot "fuzz_targets"
-$fuzzCorpDir  = Join-Path $projectRoot "fuzz_corpus"
-$findingsDir  = Join-Path $projectRoot "fuzz_findings"
-$reportDir    = Join-Path $projectRoot "report"
-$extensionsHarnessDir = Join-Path $projectRoot "extensions_harness"
+$geigerDir    = Join-Path $projectRoot "evidence/geiger"
+$miriDir      = Join-Path $projectRoot "evidence/miri"
+$fuzzCorpDir  = Join-Path $projectRoot "evidence/fuzz/corpus"
+$findingsDir  = Join-Path $projectRoot "evidence/fuzz/findings"
+$reportDir    = Join-Path $projectRoot "docs/report"
+$miriHarnessesDir = Join-Path $projectRoot "miri_harnesses"
 
 if (-not $ReportPath) {
   $ReportPath = Join-Path $reportDir "study_report.md"
@@ -168,7 +167,7 @@ if (-not $SkipGeiger) {
   $geigerLines += "|-------|---------------|--------|"
   foreach ($crate in $TargetCrates) {
     $status = if ($geigerResults.ContainsKey($crate)) { $geigerResults[$crate] } else { "SKIPPED" }
-    $geigerLines += "| $crate | $status | geiger_reports/$crate.json |"
+    $geigerLines += "| $crate | $status | evidence/geiger/$crate.json |"
   }
   Add-Section "Phase 2: Hotspot Mining (cargo-geiger)" $geigerLines
 }
@@ -196,8 +195,8 @@ if (-not $SkipMiri) {
     $testName = if ($harnessTestNames.ContainsKey($crate)) { $harnessTestNames[$crate] } else { $null }
 
     if ($testFile -and $testName) {
-      Write-Host "  [$crate] Running targeted cargo miri test via extensions_harness..."
-      Push-Location $extensionsHarnessDir
+      Write-Host "  [$crate] Running targeted cargo miri test via miri_harnesses..."
+      Push-Location $miriHarnessesDir
       try {
         $prevEap = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
@@ -254,7 +253,7 @@ if (-not $SkipMiri) {
   $miriLines += "|-------|-------------|-----|"
   foreach ($crate in $TargetCrates) {
     $status = if ($miriResults.ContainsKey($crate)) { $miriResults[$crate] } else { "SKIPPED" }
-    $miriLines += "| $crate | $status | miri_reports/$crate.log |"
+    $miriLines += "| $crate | $status | evidence/miri/$crate.log |"
   }
   $miriLines += ""
   $miriLines += "MIRIFLAGS: ``-Zmiri-symbolic-alignment-check -Zmiri-strict-provenance``"

@@ -44,7 +44,7 @@ scope = "full_suite"
 [[crate.miri_case]]
 name = "streaming_values"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "api_smoke"
 case = "serde_json_streams_multiple_values"
 exact = true
@@ -52,7 +52,7 @@ exact = true
 [[crate.miri_case]]
 name = "escape_and_number_edges"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "api_smoke"
 case = "serde_json_handles_escape_and_number_edges"
 exact = true
@@ -75,7 +75,7 @@ scope = "full_suite"
 [[crate.miri_case]]
 name = "ascii_boundary_offsets"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "api_smoke"
 case = "bstr_ascii_boundary_offsets"
 exact = true
@@ -83,7 +83,7 @@ exact = true
 [[crate.miri_case]]
 name = "invalid_utf8_search_and_trim"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "api_smoke"
 case = "bstr_invalid_utf8_search_and_trim"
 exact = true
@@ -91,7 +91,7 @@ exact = true
 [[crate.miri_case]]
 name = "grapheme_iteration"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "api_smoke"
 case = "bstr_grapheme_iteration_and_reverse_search"
 exact = true
@@ -110,7 +110,7 @@ coverage_tier = "tier2"
 [[crate.miri_case]]
 name = "unaligned_public_inputs"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "api_smoke"
 case = "memchr_handles_unaligned_public_inputs"
 exact = true
@@ -118,7 +118,7 @@ exact = true
 [[crate.miri_case]]
 name = "memmem_edge_needles"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "api_smoke"
 case = "memchr_memmem_handles_edge_needles"
 exact = true
@@ -137,7 +137,7 @@ coverage_tier = "tier2"
 [[crate.miri_case]]
 name = "ascii_unicode_boundaries"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "api_smoke"
 case = "winnow_parses_ascii_and_unicode_boundaries"
 exact = true
@@ -145,7 +145,7 @@ exact = true
 [[crate.miri_case]]
 name = "partial_numeric_and_whitespace"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "api_smoke"
 case = "winnow_handles_partial_numeric_and_whitespace_input"
 exact = true
@@ -153,7 +153,7 @@ exact = true
 [[crate.miri_case]]
 name = "nested_delimited_segments"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "api_smoke"
 case = "winnow_parses_nested_delimited_segments"
 exact = true
@@ -172,7 +172,7 @@ coverage_tier = "tier2"
 [[crate.miri_case]]
 name = "nested_inputs"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "api_smoke"
 case = "toml_parser_lexes_and_parses_nested_inputs"
 exact = true
@@ -180,7 +180,7 @@ exact = true
 [[crate.miri_case]]
 name = "multiline_strings"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "api_smoke"
 case = "toml_parser_handles_multiline_strings"
 exact = true
@@ -188,7 +188,7 @@ exact = true
 [[crate.miri_case]]
 name = "invalid_escape_decoder"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "api_smoke"
 case = "toml_parser_tracks_invalid_escape_errors"
 exact = true
@@ -207,7 +207,7 @@ coverage_tier = "tier2"
 [[crate.miri_case]]
 name = "borrowed_object"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "simd_json_triage"
 case = "simd_json_borrowed_value_parses_object_with_strings"
 exact = true
@@ -215,7 +215,7 @@ exact = true
 [[crate.miri_case]]
 name = "owned_object"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "simd_json_triage"
 case = "simd_json_owned_value_parses_object_with_strings"
 exact = true
@@ -223,7 +223,7 @@ exact = true
 [[crate.miri_case]]
 name = "tape_numeric_array"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "simd_json_triage"
 case = "simd_json_tape_exposes_numeric_array"
 exact = true
@@ -231,7 +231,7 @@ exact = true
 [[crate.miri_case]]
 name = "borrowed_unaligned_offset"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "simd_json_triage"
 case = "simd_json_borrowed_value_handles_unaligned_input_offset"
 exact = true
@@ -239,7 +239,7 @@ exact = true
 [[crate.miri_case]]
 name = "borrowed_number_heavy_document"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "simd_json_triage"
 case = "simd_json_borrowed_value_parses_number_heavy_document"
 exact = true
@@ -247,7 +247,7 @@ exact = true
 [[crate.miri_case]]
 name = "owned_escape_heavy_strings"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "simd_json_triage"
 case = "simd_json_owned_value_parses_escape_heavy_strings"
 exact = true
@@ -266,7 +266,7 @@ coverage_tier = "tier2"
 [[crate.miri_case]]
 name = "stream_events"
 scope = "targeted_smoke"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "more_crates"
 case = "quick_xml_streams_events"
 exact = true
@@ -274,7 +274,7 @@ exact = true
 [[crate.miri_case]]
 name = "attributes_and_namespaces"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "more_crates"
 case = "quick_xml_handles_attributes_and_namespaces"
 exact = true
@@ -293,7 +293,7 @@ coverage_tier = "tier2"
 [[crate.miri_case]]
 name = "minimal_object_bytes"
 scope = "targeted_smoke"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "more_crates"
 case = "goblin_parses_minimal_object_bytes"
 exact = true
@@ -301,7 +301,7 @@ exact = true
 [[crate.miri_case]]
 name = "minimal_pe_bytes"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "more_crates"
 case = "goblin_parses_minimal_pe_bytes"
 exact = true
@@ -320,7 +320,7 @@ coverage_tier = "tier2"
 [[crate.miri_case]]
 name = "parse_mutate_render"
 scope = "targeted_smoke"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "more_crates"
 case = "toml_edit_parses_and_mutates_document"
 exact = true
@@ -328,7 +328,7 @@ exact = true
 [[crate.miri_case]]
 name = "nested_mutation_roundtrip"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "more_crates"
 case = "toml_edit_roundtrips_nested_mutations"
 exact = true
@@ -347,7 +347,7 @@ coverage_tier = "tier2"
 [[crate.miri_case]]
 name = "render_html"
 scope = "targeted_smoke"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "more_crates"
 case = "pulldown_cmark_renders_html"
 exact = true
@@ -355,7 +355,7 @@ exact = true
 [[crate.miri_case]]
 name = "nested_structures"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "more_crates"
 case = "pulldown_cmark_renders_nested_structures"
 exact = true
@@ -374,7 +374,7 @@ coverage_tier = "tier2"
 [[crate.miri_case]]
 name = "build_tree"
 scope = "targeted_smoke"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "more_crates"
 case = "roxmltree_builds_tree"
 exact = true
@@ -382,7 +382,7 @@ exact = true
 [[crate.miri_case]]
 name = "namespaces_and_text"
 scope = "targeted"
-harness_dir = "extensions_harness"
+harness_dir = "miri_harnesses"
 test = "more_crates"
 case = "roxmltree_handles_namespaces_and_text"
 exact = true

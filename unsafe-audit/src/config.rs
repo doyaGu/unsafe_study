@@ -312,7 +312,7 @@ fn resolve_from_root_or_manifest(base: &Path, root: &Path, path: PathBuf) -> Pat
     if root_path.exists()
         || path.starts_with("study/")
         || path.starts_with("targets/")
-        || path.starts_with("extensions_harness")
+        || path.starts_with("miri_harnesses")
     {
         root_path
     } else {
