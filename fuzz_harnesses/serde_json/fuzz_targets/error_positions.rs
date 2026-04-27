@@ -20,7 +20,10 @@ fuzz_target!(|data: &[u8]| {
     touch_error_path(text);
 
     if !text.is_empty() {
-        let split = text.len() / 2;
+        let mut split = text.len() / 2;
+        while split > 0 && !text.is_char_boundary(split) {
+            split -= 1;
+        }
         touch_error_path(&text[..split]);
     }
 
