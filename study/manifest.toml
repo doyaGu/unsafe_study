@@ -14,22 +14,6 @@ coverage_tier = "tier1"
 name = "upstream_full"
 scope = "full_suite"
 
-[[crate.miri_case]]
-name = "streaming_values"
-scope = "targeted"
-harness_dir = "extensions_harness"
-test = "api_smoke"
-case = "serde_json_streams_multiple_values"
-exact = true
-
-[[crate.miri_case]]
-name = "escape_and_number_edges"
-scope = "targeted"
-harness_dir = "extensions_harness"
-test = "api_smoke"
-case = "serde_json_handles_escape_and_number_edges"
-exact = true
-
 [[crate.fuzz_group]]
 name = "parse_chunk_size_smoke"
 budget_label = "smoke"
@@ -56,6 +40,22 @@ coverage_tier = "tier1"
 [[crate.miri_case]]
 name = "upstream_full"
 scope = "full_suite"
+
+[[crate.miri_case]]
+name = "streaming_values"
+scope = "targeted"
+harness_dir = "extensions_harness"
+test = "api_smoke"
+case = "serde_json_streams_multiple_values"
+exact = true
+
+[[crate.miri_case]]
+name = "escape_and_number_edges"
+scope = "targeted"
+harness_dir = "extensions_harness"
+test = "api_smoke"
+case = "serde_json_handles_escape_and_number_edges"
+exact = true
 
 [[crate.fuzz_group]]
 name = "existing_parser_targets"
