@@ -205,45 +205,23 @@ fn load_manifest_plan(path: &Path, options: RunOptions) -> Result<RunPlan> {
         {
             continue;
         }
-        let crate_path = resolve_from_root_or_manifest(base, manifest_root, item.path);
+        let crate_path = resolve_from_root_or_manifest(base, manifest_root, item.path.clone());
+        let miri_cases = manifest_miri_cases(&item, base, manifest_root);
+        let fuzz_groups = manifest_fuzz_groups(
+            &item,
+            &study.fuzz_env,
+            &options.fuzz_env,
+            fuzz_time,
+            options.profile,
+            manifest_root,
+            base,
+        );
         crates.push(CratePlan {
             name: item.name,
             path: crate_path,
             cohort: item.cohort,
-            miri_cases: item
-                .miri_case
-                .into_iter()
-                .map(|case| MiriCasePlan {
-                    name: case.name,
-                    scope: case.scope.unwrap_or_else(|| "unspecified".into()),
-                    harness_dir: case
-                        .harness_dir
-                        .map(|p| resolve_from_root_or_manifest(base, manifest_root, p)),
-                    test: case.test,
-                    case: case.case,
-                    exact: case.exact.unwrap_or(false),
-                })
-                .collect(),
-            fuzz_groups: item
-                .fuzz_group
-                .into_iter()
-                .map(|group| {
-                    let mut env = study.fuzz_env.clone();
-                    env.extend(group.env);
-                    env.extend(options.fuzz_env.clone());
-                    FuzzGroupPlan {
-                        name: group.name,
-                        harness_dir: group
-                            .harness_dir
-                            .map(|p| resolve_from_root_or_manifest(base, manifest_root, p)),
-                        all: group.all.unwrap_or(false),
-                        targets: group.targets,
-                        time: apply_profile_time(options.profile, group.time.or(fuzz_time)),
-                        budget_label: group.budget_label,
-                        env,
-                    }
-                })
-                .collect(),
+            miri_cases,
+            fuzz_groups,
         });
     }
 
@@ -265,6 +243,201 @@ fn load_manifest_plan(path: &Path, options: RunOptions) -> Result<RunPlan> {
         fuzz_env: options.fuzz_env,
         crates,
     })
+}
+
+fn manifest_miri_cases(
+    item: &ManifestCrate,
+    base: &Path,
+    manifest_root: &Path,
+) -> Vec<MiriCasePlan> {
+    let mapped: Vec<_> = item
+        .miri_case
+        .iter()
+        .map(|case| MiriCasePlan {
+            name: case.name.clone(),
+            scope: case.scope.clone().unwrap_or_else(|| "unspecified".into()),
+            harness_dir: case
+                .harness_dir
+                .clone()
+                .map(|p| resolve_from_root_or_manifest(base, manifest_root, p)),
+            test: case.test.clone(),
+            case: case.case.clone(),
+            exact: case.exact.unwrap_or(false),
+        })
+        .collect();
+
+    let (builtin, harness): (Vec<_>, Vec<_>) = mapped
+        .into_iter()
+        .partition(|case| case.harness_dir.is_none());
+
+    let mut ordered = Vec::new();
+    if builtin.is_empty() && !harness.is_empty() {
+        ordered.push(default_manifest_miri_case());
+    }
+    ordered.extend(builtin);
+    ordered.extend(harness);
+    ordered
+}
+
+fn default_manifest_miri_case() -> MiriCasePlan {
+    MiriCasePlan {
+        name: "upstream_full".into(),
+        scope: "full_suite".into(),
+        harness_dir: None,
+        test: None,
+        case: None,
+        exact: false,
+    }
+}
+
+fn manifest_fuzz_groups(
+    item: &ManifestCrate,
+    study_fuzz_env: &BTreeMap<String, String>,
+    cli_fuzz_env: &BTreeMap<String, String>,
+    fuzz_time: Option<u64>,
+    profile: RunProfile,
+    manifest_root: &Path,
+    base: &Path,
+) -> Vec<FuzzGroupPlan> {
+    let mapped: Vec<_> = item
+        .fuzz_group
+        .iter()
+        .map(|group| {
+            manifest_fuzz_group_plan(
+                group,
+                study_fuzz_env,
+                cli_fuzz_env,
+                fuzz_time,
+                profile,
+                base,
+                manifest_root,
+            )
+        })
+        .collect();
+
+    let (builtin, harness): (Vec<_>, Vec<_>) = mapped
+        .into_iter()
+        .partition(|group| group.harness_dir.is_none());
+
+    let auto_harness = if harness.is_empty() {
+        find_fuzz_harness_dir(manifest_root, &item.name).map(|dir| FuzzGroupPlan {
+            name: "harness_targets".into(),
+            harness_dir: Some(dir),
+            all: true,
+            targets: Vec::new(),
+            time: apply_profile_time(profile, fuzz_time),
+            budget_label: Some("harness".into()),
+            env: merged_fuzz_env(study_fuzz_env, BTreeMap::new(), cli_fuzz_env),
+        })
+    } else {
+        None
+    };
+
+    let mut ordered = Vec::new();
+    if builtin.is_empty() && (auto_harness.is_some() || !harness.is_empty()) {
+        ordered.push(default_manifest_fuzz_group(
+            study_fuzz_env,
+            cli_fuzz_env,
+            apply_profile_time(profile, fuzz_time),
+        ));
+    }
+    ordered.extend(builtin);
+    ordered.extend(harness);
+    if let Some(group) = auto_harness {
+        ordered.push(group);
+    }
+    ordered
+}
+
+fn manifest_fuzz_group_plan(
+    group: &ManifestFuzzGroup,
+    study_fuzz_env: &BTreeMap<String, String>,
+    cli_fuzz_env: &BTreeMap<String, String>,
+    fuzz_time: Option<u64>,
+    profile: RunProfile,
+    base: &Path,
+    manifest_root: &Path,
+) -> FuzzGroupPlan {
+    FuzzGroupPlan {
+        name: group.name.clone(),
+        harness_dir: group
+            .harness_dir
+            .clone()
+            .map(|p| resolve_from_root_or_manifest(base, manifest_root, p)),
+        all: group.all.unwrap_or(false),
+        targets: group.targets.clone(),
+        time: apply_profile_time(profile, group.time.or(fuzz_time)),
+        budget_label: group.budget_label.clone(),
+        env: merged_fuzz_env(study_fuzz_env, group.env.clone(), cli_fuzz_env),
+    }
+}
+
+fn default_manifest_fuzz_group(
+    study_fuzz_env: &BTreeMap<String, String>,
+    cli_fuzz_env: &BTreeMap<String, String>,
+    fuzz_time: Option<u64>,
+) -> FuzzGroupPlan {
+    FuzzGroupPlan {
+        name: "existing_targets".into(),
+        harness_dir: None,
+        all: true,
+        targets: Vec::new(),
+        time: fuzz_time,
+        budget_label: Some("default".into()),
+        env: merged_fuzz_env(study_fuzz_env, BTreeMap::new(), cli_fuzz_env),
+    }
+}
+
+fn merged_fuzz_env(
+    study_fuzz_env: &BTreeMap<String, String>,
+    group_env: BTreeMap<String, String>,
+    cli_fuzz_env: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let mut env = study_fuzz_env.clone();
+    env.extend(group_env);
+    env.extend(cli_fuzz_env.clone());
+    env
+}
+
+fn find_fuzz_harness_dir(manifest_root: &Path, crate_name: &str) -> Option<PathBuf> {
+    for root in fuzz_harness_roots(manifest_root) {
+        let harness_root = root.join("fuzz_harnesses");
+        let Ok(entries) = std::fs::read_dir(&harness_root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if !file_type.is_dir() {
+                continue;
+            }
+            let dir_name = entry.file_name();
+            let dir_name = dir_name.to_string_lossy();
+            if normalize_package_name(&dir_name) != normalize_package_name(crate_name) {
+                continue;
+            }
+            let manifest = entry.path().join("Cargo.toml");
+            if manifest.is_file() {
+                return Some(entry.path());
+            }
+        }
+    }
+    None
+}
+
+fn fuzz_harness_roots(manifest_root: &Path) -> Vec<PathBuf> {
+    let mut roots = vec![manifest_root.to_path_buf()];
+    if let Some(parent) = manifest_root.parent() {
+        if parent != manifest_root {
+            roots.push(parent.to_path_buf());
+        }
+    }
+    roots
+}
+
+fn normalize_package_name(name: &str) -> String {
+    name.replace('_', "-")
 }
 
 fn normalized_formats(formats: Vec<OutputFormat>) -> Vec<OutputFormat> {
@@ -520,6 +693,85 @@ env = { B = "group", C = "group" }
         assert_eq!(group.env.get("B").unwrap(), "group");
         assert_eq!(group.env.get("C").unwrap(), "cli");
         assert_eq!(group.env.get("D").unwrap(), "cli");
+    }
+
+    #[test]
+    fn manifest_prepends_builtin_miri_before_harness_cases() {
+        let dir = tempdir().unwrap();
+        let manifest = dir.path().join("study.toml");
+        std::fs::create_dir_all(dir.path().join("demo")).unwrap();
+        std::fs::create_dir_all(dir.path().join("harness")).unwrap();
+        std::fs::write(
+            &manifest,
+            "[[crate]]\nname='demo'\npath='demo'\n[[crate.miri_case]]\nname='targeted'\nharness_dir='harness'\ntest='demo'\ncase='case_name'\nexact=true\n",
+        )
+        .unwrap();
+
+        let plan = load_plan(&manifest, RunOptions::default()).unwrap();
+        let cases = &plan.crates[0].miri_cases;
+
+        assert_eq!(cases.len(), 2);
+        assert_eq!(cases[0].name, "upstream_full");
+        assert!(cases[0].harness_dir.is_none());
+        assert_eq!(cases[1].name, "targeted");
+        assert!(cases[1].harness_dir.is_some());
+    }
+
+    #[test]
+    fn manifest_appends_detected_fuzz_harness_after_builtin_groups() {
+        let dir = tempdir().unwrap();
+        let study_dir = dir.path().join("study");
+        std::fs::create_dir_all(&study_dir).unwrap();
+        let manifest = study_dir.join("study.toml");
+        std::fs::create_dir_all(dir.path().join("fuzz_harnesses/demo")).unwrap();
+        std::fs::write(
+            dir.path().join("fuzz_harnesses/demo/Cargo.toml"),
+            "[package]\nname='demo-fuzz'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &manifest,
+            "[[crate]]\nname='demo'\npath='demo'\n[[crate.fuzz_group]]\nname='builtin'\nall=true\n",
+        )
+        .unwrap();
+
+        let plan = load_plan(&manifest, RunOptions::default()).unwrap();
+        let groups = &plan.crates[0].fuzz_groups;
+
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].name, "builtin");
+        assert!(groups[0].harness_dir.is_none());
+        assert_eq!(groups[1].name, "harness_targets");
+        assert_eq!(
+            groups[1].harness_dir.as_ref().unwrap(),
+            &dir.path().join("fuzz_harnesses/demo")
+        );
+    }
+
+    #[test]
+    fn manifest_injects_builtin_fuzz_group_before_harness_only_groups() {
+        let dir = tempdir().unwrap();
+        let manifest = dir.path().join("study.toml");
+        std::fs::create_dir_all(dir.path().join("fuzz_harnesses/demo")).unwrap();
+        std::fs::write(
+            dir.path().join("fuzz_harnesses/demo/Cargo.toml"),
+            "[package]\nname='demo-fuzz'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &manifest,
+            "[[crate]]\nname='demo'\npath='demo'\n[[crate.fuzz_group]]\nname='manual_harness'\nharness_dir='fuzz_harnesses/demo'\nall=true\n",
+        )
+        .unwrap();
+
+        let plan = load_plan(&manifest, RunOptions::default()).unwrap();
+        let groups = &plan.crates[0].fuzz_groups;
+
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].name, "existing_targets");
+        assert!(groups[0].harness_dir.is_none());
+        assert_eq!(groups[1].name, "manual_harness");
+        assert!(groups[1].harness_dir.is_some());
     }
 
     #[test]
