@@ -7,6 +7,8 @@ This directory groups archived execution evidence produced by the study.
 - `fuzz/corpus/`: seed inputs used for fuzz targets.
 - `fuzz/findings/`: fuzz logs, findings, and reproducer-oriented artifacts.
 
-These files are evidence archives. The canonical study inputs remain under
-`study/`, `targets/`, `miri_harnesses/`, and the active crate-local fuzz
-harnesses under `targets/<crate>/fuzz/`.
+These files are evidence archives. The active execution inputs and harness
+workspaces live under `study/`, `targets/`, `miri_harnesses/`, and
+`fuzz_harnesses/`. The manifest-driven study still executes crate-local fuzz
+harnesses under `targets/<crate>/fuzz/` unless a `fuzz_group` overrides
+`harness_dir`.

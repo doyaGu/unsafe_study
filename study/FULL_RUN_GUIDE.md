@@ -7,6 +7,7 @@ The source of truth is:
 
 - `study/manifest.toml` for crate selection, Miri cases, and fuzz groups
 - `unsafe-audit` for execution behavior and report format
+- `scripts/run_all.sh` for the recommended Linux entrypoint
 
 If any older report or note disagrees with this guide, prefer the current
 runner and generated `report.json`.
@@ -80,7 +81,7 @@ at least:
 - `pkg-config`
 - `libssl-dev`
 - `git`
-- `python3`
+- `python3` (recommended: `run_all.sh` uses it for binary-path discovery but can fall back to `cargo run`)
 - `jq` for report inspection
 
 The included [Dockerfile](/home/touyou/workspace/unsafe_study/Dockerfile:1)
@@ -90,6 +91,20 @@ shows one known-good environment.
 
 Do not start with a full 12-crate run if the machine or environment has not
 been validated. Use this sequence.
+
+### Entry point behavior
+
+Use `bash scripts/run_all.sh ...` as the normal Linux entrypoint.
+
+The wrapper:
+
+- builds the repo-local `unsafe-audit` crate
+- reads Cargo JSON messages to find the emitted executable path when possible
+- executes that resolved binary directly
+- falls back to `cargo run --manifest-path unsafe-audit/Cargo.toml -- study/manifest.toml ...` if path discovery is unavailable
+
+This avoids hardcoding a `target/` path while still keeping execution pinned to
+the checked-out repository.
 
 ### 1. Preflight checks
 
@@ -115,6 +130,12 @@ This confirms crate selection, Miri case wiring, and fuzz target groups without
 running analysis tools.
 
 ```bash
+bash scripts/run_all.sh --dry-run
+```
+
+Direct equivalent:
+
+```bash
 cargo run --manifest-path unsafe-audit/Cargo.toml -- \
   study/manifest.toml \
   --dry-run
@@ -130,6 +151,16 @@ Expected outcome:
 ### 3. Run a full smoke pass first
 
 This is the minimum end-to-end health check for all phases and all crates.
+
+```bash
+bash scripts/run_all.sh \
+  --profile smoke \
+  --jobs 4 \
+  --fuzz-jobs 4 \
+  --output /tmp/unsafe-study-smoke
+```
+
+Direct equivalent:
 
 ```bash
 cargo run --manifest-path unsafe-audit/Cargo.toml -- \

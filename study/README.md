@@ -5,8 +5,18 @@
 For a full end-to-end execution runbook, see
 [FULL_RUN_GUIDE.md](/home/touyou/workspace/unsafe_study/study/FULL_RUN_GUIDE.md).
 
-The protocol is executed natively by passing the manifest path to
-`unsafe-audit`:
+The recommended Linux entrypoint is:
+
+```bash
+bash scripts/run_all.sh
+```
+
+That wrapper keeps execution pinned to this repository's `unsafe-audit` crate,
+asks Cargo for the emitted executable path when possible, and falls back to
+`cargo run` if that discovery step is unavailable.
+
+The low-level equivalent is to pass the manifest path to `unsafe-audit`
+directly:
 
 ```bash
 cargo run --manifest-path unsafe-audit/Cargo.toml -- \
@@ -131,12 +141,21 @@ The top-level report includes execution metadata:
 Dry run:
 
 ```bash
-cargo run --manifest-path unsafe-audit/Cargo.toml -- \
-  study/manifest.toml \
-  --dry-run
+bash scripts/run_all.sh --dry-run
 ```
 
 Restricted study subset:
+
+```bash
+bash scripts/run_all.sh \
+  --crates httparse,simd-json \
+  --profile smoke \
+  --jobs 2 \
+  --fuzz-jobs 2 \
+  --output /tmp/study-smoke
+```
+
+Direct equivalent for the same subset:
 
 ```bash
 cargo run --manifest-path unsafe-audit/Cargo.toml -- \

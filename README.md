@@ -270,8 +270,12 @@ The canonical 12-crate protocol lives in:
 - [study/manifest.toml](study/manifest.toml)
 - [study/README.md](study/README.md)
 
-The shell wrapper [scripts/run_all.sh](scripts/run_all.sh) is only a thin
-wrapper around:
+The recommended Linux entrypoint is [scripts/run_all.sh](scripts/run_all.sh).
+It builds the repo-local `unsafe-audit` crate, resolves the emitted executable
+path from Cargo metadata when possible, and falls back to `cargo run` if that
+discovery step is unavailable.
+
+The low-level equivalent remains:
 
 ```bash
 cargo run --manifest-path unsafe-audit/Cargo.toml -- study/manifest.toml
@@ -287,7 +291,7 @@ miri_harnesses/         active targeted Miri harnesses used by the study
 evidence/               archived Geiger, Miri, and fuzz artifacts
 docs/                   report and proposal materials
 fuzz_harnesses/         active extracted fuzz harnesses
-scripts/                thin wrappers around the manifest runner
+scripts/                repo-local runner wrappers and helper scripts
 ```
 
 ## Current Status

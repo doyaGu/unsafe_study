@@ -556,7 +556,7 @@ bash scripts/run_fuzz.sh httparse parse_request 300  # Single target
 
 | File | Purpose |
 |------|---------|
-| `scripts/run_all.sh` | Full pipeline automation (Linux) |
+| `scripts/run_all.sh` | Full pipeline automation (Linux); resolves and executes the repo-local `unsafe-audit` binary when possible, then falls back to `cargo run` |
 | `scripts/run_fuzz.sh` | Fuzzing automation (Linux) |
 | `scripts/summarize_geiger.py` | Geiger JSON to Markdown summary |
 | `evidence/geiger/*_annotations.md` | Unsafe hotspot annotations per crate |

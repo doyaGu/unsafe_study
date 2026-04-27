@@ -51,7 +51,9 @@ crates.
 - `miri_harnesses/`: added integration tests used mainly for targeted Miri
   coverage across multiple crates.
 - `fuzz_harnesses/`: active extracted copies of custom fuzz harnesses that were
-  added inside `targets/*` repositories.
+  added inside `targets/*` repositories. These are maintained separately from
+  the crate-local `targets/<crate>/fuzz/` trees that the manifest-driven study
+  executes by default.
 - `evidence/fuzz/corpus/`: seed corpora used by fuzz targets.
 
 If the question is "what extra execution paths did we add beyond upstream
@@ -85,6 +87,9 @@ These directories support local execution but are not part of the main evidence
 chain.
 
 - `scripts/`: wrappers and helper scripts.
+- `scripts/`: wrappers and helper scripts. In particular,
+  `scripts/run_all.sh` resolves the repo-local `unsafe-audit` binary from Cargo
+  output instead of hardcoding a `target/` path.
 - `tmp/`: temporary intake, scratch projects, and disposable working material.
 
 If something is experimental, local-only, or transient, it should land here
@@ -112,6 +117,7 @@ Canonical directories:
 - `targets/`
 - `unsafe-audit/`
 - `miri_harnesses/`
+- `fuzz_harnesses/`
 
 Mostly derived, archived, or presentation-oriented directories:
 

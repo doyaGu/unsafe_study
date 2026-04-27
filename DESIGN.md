@@ -196,7 +196,7 @@ The 12-crate case study now has its own manifest-driven layer:
 - [`study/manifest.toml`](study/manifest.toml) defines crate cohort plus normalized `miri_case` and `fuzz_group` entries.
 - `unsafe-audit` now has one path-based entrypoint: directory input means crate/batch execution, file input means manifest-driven study execution.
 - [`study/README.md`](study/README.md) documents the normalized protocol shape.
-- [`scripts/run_all.sh`](scripts/run_all.sh) is only a thin wrapper around that runner.
+- [`scripts/run_all.sh`](scripts/run_all.sh) is the repo-local Linux wrapper for that runner: it asks Cargo for the emitted `unsafe-audit` executable path when possible and otherwise falls back to `cargo run`.
 
 This keeps `unsafe-audit` readable as a generic single-crate tool while making the research protocol explicit and reproducible for the 12-crate study.
 
