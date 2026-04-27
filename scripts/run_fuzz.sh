@@ -13,8 +13,8 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TARGETS_DIR="$PROJECT_ROOT/targets"
-FINDINGS_DIR="$PROJECT_ROOT/fuzz_findings"
-CORPUS_DIR="$PROJECT_ROOT/fuzz_corpus"
+FINDINGS_DIR="$PROJECT_ROOT/evidence/fuzz/findings"
+CORPUS_DIR="$PROJECT_ROOT/evidence/fuzz/corpus"
 DEFAULT_TIME=3600
 
 # Ensure nightly toolchain is available

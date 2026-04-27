@@ -1,2 +1,0 @@
-header:value
-foo bar foo baz

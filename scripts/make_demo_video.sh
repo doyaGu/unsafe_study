@@ -141,9 +141,9 @@ make_slide $i "$RED" 6 \
   Classification: TRUE POSITIVE (code-level audit confirms)
 
   Artifacts:
-    miri_reports/simd_json_triage.md
-    report/simd_json_stacked_borrows_explainer.md
-    report/simd_json_upstream_issue_draft.md"
+    evidence/miri/simd_json_triage.md
+    docs/report/simd_json_stacked_borrows_explainer.md
+    docs/report/simd_json_upstream_issue_draft.md"
 i=$((i+1))
 
 # Slide 6: Fuzzing
@@ -212,9 +212,9 @@ make_slide $i "$FG" 6 \
     bash scripts/run_all.sh --fuzz-time 3600
 
   Key files:
-    report/final_report.md           Full study report
-    report/simd_json_stacked_borrows_explainer.md   Technical deep-dive
-    miri_reports/simd_json_triage.md Miri triage notes
+    docs/report/final_report.md      Full study report
+    docs/report/simd_json_stacked_borrows_explainer.md   Technical deep-dive
+    evidence/miri/simd_json_triage.md Miri triage notes
     scripts/run_all.sh               Reproduce everything
 
   GitHub: https://github.com/doyaGu/unsafe_study"

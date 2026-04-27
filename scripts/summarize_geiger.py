@@ -3,8 +3,8 @@
 summarize_geiger.py — Parse cargo-geiger JSON and produce Markdown hotspot tables.
 
 Usage:
-  python scripts/summarize_geiger.py geiger_reports/
-  python scripts/summarize_geiger.py geiger_reports/httparse.json
+    python scripts/summarize_geiger.py evidence/geiger/
+    python scripts/summarize_geiger.py evidence/geiger/httparse.json
 """
 
 import json
