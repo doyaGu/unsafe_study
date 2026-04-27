@@ -60,8 +60,10 @@ pub fn run_geiger(
         duration_ms: output.duration_ms,
         log_path: Some(log_path.display().to_string()),
         summary: match (root_unsafe, dependency_unsafe) {
-            (Some(root), Some(deps)) => format!("root unsafe {root}, dependency unsafe {deps}"),
-            (Some(root), None) => format!("root unsafe {root}"),
+            (Some(root), Some(deps)) => {
+                format!("root unsafe exprs {root}, dependency unsafe exprs {deps}")
+            }
+            (Some(root), None) => format!("root unsafe exprs {root}"),
             _ if status == PhaseStatus::Skipped => "geiger tool failure, skipped".into(),
             _ if output.success => "geiger completed".into(),
             _ => "geiger failed".into(),
@@ -1059,11 +1061,7 @@ struct GeigerUnsafety {
 
 #[derive(Debug, Deserialize)]
 struct GeigerCounts {
-    functions: GeigerUnsafeCount,
     exprs: GeigerUnsafeCount,
-    item_impls: GeigerUnsafeCount,
-    item_traits: GeigerUnsafeCount,
-    methods: GeigerUnsafeCount,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1091,13 +1089,13 @@ fn parse_geiger_counts(output: &str, crate_plan: &CratePlan) -> (Option<usize>, 
         return (None, None);
     };
 
-    let root_unsafe = geiger_used_unsafe_total(&report.packages[root_index]);
+    let root_unsafe = geiger_used_unsafe_exprs(&report.packages[root_index]);
     let dependency_unsafe = report
         .packages
         .iter()
         .enumerate()
         .filter(|(index, _)| *index != root_index)
-        .map(|(_, package)| geiger_used_unsafe_total(package))
+        .map(|(_, package)| geiger_used_unsafe_exprs(package))
         .sum();
 
     (Some(root_unsafe), Some(dependency_unsafe))
@@ -1157,13 +1155,8 @@ fn decode_geiger_file_path(source_path: &str) -> Option<PathBuf> {
     Some(PathBuf::from(path_only))
 }
 
-fn geiger_used_unsafe_total(package: &GeigerPackage) -> usize {
-    let used = &package.unsafety.used;
-    used.functions.unsafe_count
-        + used.exprs.unsafe_count
-        + used.item_impls.unsafe_count
-        + used.item_traits.unsafe_count
-        + used.methods.unsafe_count
+fn geiger_used_unsafe_exprs(package: &GeigerPackage) -> usize {
+    package.unsafety.used.exprs.unsafe_count
 }
 
 fn miri_verdict(strict: &CommandOutput, baseline: Option<&CommandOutput>) -> String {

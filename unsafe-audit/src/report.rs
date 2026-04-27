@@ -377,10 +377,10 @@ fn phase_detail(phase: &PhaseReport) -> String {
             excerpt: excerpt_text,
         } => {
             if let Some(root_unsafe) = root_unsafe {
-                fields.push(format!("root_unsafe={root_unsafe}"));
+                fields.push(format!("root_unsafe_exprs={root_unsafe}"));
             }
             if let Some(dependency_unsafe) = dependency_unsafe {
-                fields.push(format!("dependency_unsafe={dependency_unsafe}"));
+                fields.push(format!("dependency_unsafe_exprs={dependency_unsafe}"));
             }
             if let Some(preview) = detail_excerpt(excerpt_text.as_deref()) {
                 fields.push(format!("excerpt={preview}"));

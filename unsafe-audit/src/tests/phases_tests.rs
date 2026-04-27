@@ -131,15 +131,15 @@ fn geiger_writes_log_and_extracts_root_and_dependency_counts() {
     let executor = ScriptedExecutor::new(vec![output(true, &geiger_output)]);
     let phase = run_geiger(&crate_plan(dir.path().into()), dir.path(), &executor).unwrap();
     assert_eq!(phase.status, PhaseStatus::Clean);
-    assert!(phase.summary.contains("root unsafe 7, dependency unsafe 5"));
+    assert!(phase.summary.contains("root unsafe exprs 4, dependency unsafe exprs 1"));
     match phase.evidence {
         PhaseEvidence::Geiger {
             root_unsafe,
             dependency_unsafe,
             ..
         } => {
-            assert_eq!(root_unsafe, Some(7));
-            assert_eq!(dependency_unsafe, Some(5));
+            assert_eq!(root_unsafe, Some(4));
+            assert_eq!(dependency_unsafe, Some(1));
         }
         _ => panic!("expected geiger evidence"),
     }
