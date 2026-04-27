@@ -1,0 +1,43 @@
+[package]
+name = "bstr-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+members = ["."]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+bstr = { path = "../../targets/bstr" }
+
+[[bin]]
+name = "bstr_validate"
+path = "fuzz_targets/bstr_validate.rs"
+
+[[bin]]
+name = "bstr_inv_memchr"
+path = "fuzz_targets/bstr_inv_memchr.rs"
+
+[[bin]]
+name = "bstr_inv_memrchr"
+path = "fuzz_targets/bstr_inv_memrchr.rs"
+
+[[bin]]
+name = "bstr_decode_grapheme"
+path = "fuzz_targets/bstr_decode_grapheme.rs"
+
+[[bin]]
+name = "bstr_whitespace_len_fwd"
+path = "fuzz_targets/bstr_whitespace_len_fwd.rs"
+
+[[bin]]
+name = "bstr_alignment"
+path = "fuzz_targets/bstr_alignment.rs"
+
+[[bin]]
+name = "bstr_fuzz_ops"
+path = "fuzz_targets/bstr_fuzz_ops.rs"

@@ -1,0 +1,22 @@
+[package]
+name = "serde_json-fuzz"
+version = "0.0.0"
+authors = ["David Tolnay <dtolnay@gmail.com>"]
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+members = ["."]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+serde_json = { path = "../../targets/serde_json" }
+
+[[bin]]
+name = "from_str"
+path = "fuzz_targets/from_str.rs"
+test = false
+doc = false
