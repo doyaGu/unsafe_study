@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bstr = { path = "../targets/bstr" }
 memchr = { path = "../targets/memchr" }
+serde_json = { path = "../targets/serde_json" }
 toml_parser = { path = "../targets/toml_parser", features = ["unsafe"] }
 winnow = { path = "../targets/winnow" }
 simd-json = { path = "../targets/simd-json" }
