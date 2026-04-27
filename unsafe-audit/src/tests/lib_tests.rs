@@ -25,6 +25,12 @@ impl CommandExecutor for FakeExecutor {
 }
 
 #[test]
+fn unsafe_site_summary_uses_scan_state() {
+    assert_eq!(unsafe_site_summary(true, 0), "0 unsafe sites");
+    assert_eq!(unsafe_site_summary(false, 0), "scan skipped");
+}
+
+#[test]
 fn single_crate_plan_can_run_with_fake_commands() {
     let dir = tempdir().unwrap();
     std::fs::write(

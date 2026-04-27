@@ -78,6 +78,14 @@ pub fn write_report(report: &Report, output_root: &Path, formats: &[OutputFormat
     report::write_reports(report, output_root, formats)
 }
 
+fn unsafe_site_summary(scan_enabled: bool, unsafe_site_count: usize) -> String {
+    if scan_enabled {
+        format!("{unsafe_site_count} unsafe sites")
+    } else {
+        "scan skipped".into()
+    }
+}
+
 fn run_crate(
     crate_plan: &CratePlan,
     plan: &RunPlan,
@@ -150,12 +158,13 @@ fn run_crate(
     let (unsafe_sites, pattern_summary) = scan
         .map(|s| (s.sites, s.summary))
         .unwrap_or_else(|| (Vec::new(), Default::default()));
+    let unsafe_summary = unsafe_site_summary(plan.phases.scan, unsafe_sites.len());
     eprintln!(
-        "[{}/{}] crate {}: done ({} unsafe sites, {} phase records, {})",
+        "[{}/{}] crate {}: done ({}, {} phase records, {})",
         ordinal,
         total,
         crate_plan.name,
-        unsafe_sites.len(),
+        unsafe_summary,
         phases.len(),
         format_duration_ms(crate_start.elapsed().as_millis())
     );

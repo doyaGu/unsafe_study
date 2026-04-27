@@ -222,6 +222,33 @@ pub fn build_review_priority(
     rows
 }
 
+fn unsafe_site_count_label(scan_enabled: bool, unsafe_site_count: usize) -> String {
+    if scan_enabled {
+        unsafe_site_count.to_string()
+    } else {
+        "-".into()
+    }
+}
+
+fn append_unsafe_inventory(md: &mut String, krate: &CrateReport, scan_enabled: bool) {
+    if !scan_enabled {
+        md.push_str("- scan: skipped\n- sites: -\n\n");
+        return;
+    }
+
+    md.push_str(&format!(
+        "- sites: {}\n- unsafe blocks: {}\n- unsafe fns: {}\n- unsafe impls: {}\n- extern blocks: {}\n- pointer operations: {}\n- transmutes: {}\n- unchecked operations: {}\n\n",
+        krate.unsafe_sites.len(),
+        krate.pattern_summary.unsafe_blocks,
+        krate.pattern_summary.unsafe_fns,
+        krate.pattern_summary.unsafe_impls,
+        krate.pattern_summary.extern_blocks,
+        krate.pattern_summary.ptr_ops,
+        krate.pattern_summary.transmutes,
+        krate.pattern_summary.unchecked_ops
+    ));
+}
+
 pub fn render_markdown(report: &Report) -> String {
     let mut md = String::new();
     md.push_str(&format!(
@@ -261,7 +288,7 @@ pub fn render_markdown(report: &Report) -> String {
         md.push_str(&format!(
             "| {} | {} | {} | {} | {} |\n",
             krate.name,
-            krate.unsafe_sites.len(),
+            unsafe_site_count_label(report.execution.phases.scan, krate.unsafe_sites.len()),
             phase_cell(&krate.phases, PhaseKind::Geiger),
             phase_cell(&krate.phases, PhaseKind::Miri),
             phase_cell(&krate.phases, PhaseKind::Fuzz)
@@ -272,17 +299,7 @@ pub fn render_markdown(report: &Report) -> String {
         md.push_str(&format!("\n## Crate `{}`\n\n", krate.name));
         md.push_str(&format!("Path: `{}`\n\n", krate.path));
         md.push_str("### Unsafe inventory\n\n");
-        md.push_str(&format!(
-            "- sites: {}\n- unsafe blocks: {}\n- unsafe fns: {}\n- unsafe impls: {}\n- extern blocks: {}\n- pointer operations: {}\n- transmutes: {}\n- unchecked operations: {}\n\n",
-            krate.unsafe_sites.len(),
-            krate.pattern_summary.unsafe_blocks,
-            krate.pattern_summary.unsafe_fns,
-            krate.pattern_summary.unsafe_impls,
-            krate.pattern_summary.extern_blocks,
-            krate.pattern_summary.ptr_ops,
-            krate.pattern_summary.transmutes,
-            krate.pattern_summary.unchecked_ops
-        ));
+        append_unsafe_inventory(&mut md, krate, report.execution.phases.scan);
 
         md.push_str("### Dynamic evidence\n\n");
         md.push_str("| phase | name | status | summary | detail | log |\n");

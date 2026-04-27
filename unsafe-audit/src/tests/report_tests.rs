@@ -20,6 +20,12 @@ fn test_execution() -> ExecutionConfig {
     }
 }
 
+fn test_execution_without_scan() -> ExecutionConfig {
+    let mut execution = test_execution();
+    execution.phases.scan = false;
+    execution
+}
+
 #[test]
 fn markdown_contains_crate_rows() {
     let report = Report {
@@ -37,6 +43,28 @@ fn markdown_contains_crate_rows() {
         }],
     };
     assert!(render_markdown(&report).contains("| demo | 0 |"));
+}
+
+#[test]
+fn markdown_hides_unsafe_site_counts_when_scan_is_skipped() {
+    let report = Report {
+        schema_version: 1,
+        study_name: "s".into(),
+        execution: test_execution_without_scan(),
+        crates: vec![CrateReport {
+            name: "demo".into(),
+            path: "demo".into(),
+            cohort: None,
+            unsafe_sites: Vec::new(),
+            pattern_summary: PatternSummary::default(),
+            phases: Vec::new(),
+            review_priority: Vec::new(),
+        }],
+    };
+
+    let markdown = render_markdown(&report);
+    assert!(markdown.contains("| demo | - | - | - | - |"));
+    assert!(markdown.contains("### Unsafe inventory\n\n- scan: skipped\n- sites: -\n"));
 }
 
 #[test]
