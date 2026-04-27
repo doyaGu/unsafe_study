@@ -1,6 +1,0 @@
-# Heading
-
-- a
-- b
-
-`code`
